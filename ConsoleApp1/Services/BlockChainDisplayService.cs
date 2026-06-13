@@ -17,12 +17,14 @@ namespace BlockChain_01.Services
             {
                 Console.WriteLine();
                 Console.WriteLine($"Index: {block.Index}");
-                Console.WriteLine($"TimeStamp: {block.TimeStamp}");
-                Console.WriteLine($"Initiator: {block.Author}");
-                Console.WriteLine($"Data: {block.Data}");
-                Console.WriteLine($"Nonce: {block.Nonce}");
                 Console.WriteLine($"PreviousHash: {block.PreviousHash}");
                 Console.WriteLine($"Hash: {block.Hash}");
+                Console.WriteLine($"Difficulty: {block.Difficulty}");
+                Console.WriteLine($"Nonce: {block.Nonce}");
+                Console.WriteLine($"TimeStamp: {block.TimeStamp}");
+                Console.WriteLine($"Generating Time: {block.MiningDuration}");
+                Console.WriteLine($"Initiator: {block.Author}");
+                Console.WriteLine($"Data: {block.Data}");
                 Console.WriteLine(new string('-', 50));
             }
         }
@@ -34,13 +36,16 @@ namespace BlockChain_01.Services
 
             if (block == null) { Console.WriteLine("Block not found."); return; }
 
+            Console.WriteLine();
             Console.WriteLine($"Index: {block.Index}");
-            Console.WriteLine($"TimeStamp: {block.TimeStamp}");
-            Console.WriteLine($"Initiator: {block.Author}");
-            Console.WriteLine($"Data: {block.Data}");
-            Console.WriteLine($"Nonce: {block.Nonce}");
             Console.WriteLine($"PreviousHash: {block.PreviousHash}");
             Console.WriteLine($"Hash: {block.Hash}");
+            Console.WriteLine($"Difficulty: {block.Difficulty}");
+            Console.WriteLine($"Nonce: {block.Nonce}");
+            Console.WriteLine($"TimeStamp: {block.TimeStamp}");
+            Console.WriteLine($"Generating Time: {block.MiningDuration}");
+            Console.WriteLine($"Initiator: {block.Author}");
+            Console.WriteLine($"Data: {block.Data}");
             Console.WriteLine(new string('-', 50));
         }
 

@@ -16,7 +16,7 @@ namespace BlockChain_01.Services
             CancellationToken cancellationToken = default)
         {
             string target = new string('0', difficulty);
-            int threadCount = Environment.ProcessorCount/2;
+            int threadCount = Environment.ProcessorCount / 2;
 
             Console.WriteLine($"[Mining] Launching {threadCount} threads in difficulty: {difficulty} ...");
 
@@ -30,7 +30,7 @@ namespace BlockChain_01.Services
 
             var tasks = Enumerable.Range(0, threadCount).Select(threadIndex => Task.Run(() =>
             {
-                Block localBlock = block.Clone();
+                Block localBlock = block.Clone(difficulty);
 
                 var localHashingService = new HashingService();
 
@@ -53,7 +53,7 @@ namespace BlockChain_01.Services
                         return;
                     }
 
-                    if (nonce % (100_000 * threadCount) == threadIndex)
+                    if (nonce % (100_000 * threadCount) == 0)
                         Console.Write(".");
                 }
             }, token)).ToArray();
@@ -65,6 +65,7 @@ namespace BlockChain_01.Services
             catch (OperationCanceledException) { }
 
             sw.Stop();
+            block.MiningDuration = sw.Elapsed.TotalSeconds;
 
             if (cancellationToken.IsCancellationRequested && winnerHash == null)
             {
