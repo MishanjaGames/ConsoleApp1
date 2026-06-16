@@ -7,6 +7,9 @@ namespace BlockChain_01.Services
     {
         private readonly HashingService _hashingService;
 
+        // Vanity mining: target is a fixed HEX-word prefix instead of N zeros.
+        public string VanityTarget { get; set; } = "cafe";
+
         public MiningService(HashingService hashingService)
         {
             _hashingService = hashingService;
@@ -15,10 +18,10 @@ namespace BlockChain_01.Services
         public async Task<long?> MineBlockAsync(Block block, int difficulty = 4,
             CancellationToken cancellationToken = default)
         {
-            string target = new string('0', difficulty);
+            string target = VanityTarget;
             int threadCount = Environment.ProcessorCount / 2;
 
-            Console.WriteLine($"[Mining] Launching {threadCount} threads in difficulty: {difficulty} ...");
+            Console.WriteLine($"[Mining] Launching {threadCount} threads, vanity target: \"{target}\" ...");
 
             Stopwatch sw = Stopwatch.StartNew();
 

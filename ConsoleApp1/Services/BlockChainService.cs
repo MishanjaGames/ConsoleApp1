@@ -75,7 +75,7 @@ namespace BlockChain_01.Services
                 // Hash integrity
                 if (cur.Hash != _hashingService.ComputeHash(cur)) return false;
                 if (cur.PreviousHash != prev.Hash) return false;
-                if (!cur.Hash.StartsWith(new string('0', cur.Difficulty))) return false;
+                if (!cur.Hash.StartsWith(_miningService.VanityTarget)) return false;
 
                 // 1. MiningDuration cannot be negative
                 if (cur.MiningDuration < 0) return false;

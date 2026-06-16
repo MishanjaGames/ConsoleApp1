@@ -6,7 +6,7 @@ static void PrintResult(string testName, bool passed)
     string status = passed ? "[TEST COMPLETED]" : "[TEST FAILED]";
     Console.WriteLine($"{status} {testName}\n");
 }
- void TestSystem()
+void TestSystem()
 {
     Console.WriteLine("=== Test 1: Default workload ===");
     var bc = new BlockChainService();
@@ -62,6 +62,20 @@ static void PrintResult(string testName, bool passed)
     PrintResult("[Attack]: Difficulty limit", limitHeld);
 }
 
+async Task TestVanityMining()
+{
+    Console.WriteLine("=== Vanity Mining Demo (target prefix: \"cafe\") ===");
+    var bc = new BlockChainService();
+    await bc.AddBlockAsync("Alice", "TX: Alice->Bob: 10");
+    await bc.AddBlockAsync("Bob", "TX: Bob->Carol: 5");
+    await bc.AddBlockAsync("Carol", "TX: Carol->Alice: 2");
+
+    foreach (var b in bc.Chain)
+        Console.WriteLine($"Index {b.Index} | Hash: {b.Hash}");
+
+    PrintResult("Vanity Mining", bc.IsValid());
+}
+
 
 var blockchain = new BlockChainService();
 var display = new BlockChainDisplayService(blockchain);
@@ -81,6 +95,7 @@ do
     Console.WriteLine("4: Validate BlockChain");
     Console.WriteLine("5: Get Block by Index");
     Console.WriteLine("6: Initiate testing");
+    Console.WriteLine("7: Vanity Mining Demo");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -155,6 +170,9 @@ do
             break;
         case "6":
             TestSystem();
+            break;
+        case "7":
+            await TestVanityMining();
             break;
         default:
             if (choice != "0")
