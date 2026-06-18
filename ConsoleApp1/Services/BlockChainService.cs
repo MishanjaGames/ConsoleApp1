@@ -4,14 +4,16 @@ namespace BlockChain_01.Services
 {
     public class BlockChainService
     {
-        private MiningService _miningService { get; set; }
-        private HashingService _hashingService { get; set; }
+        private readonly MiningService _miningService;
+        private readonly HashingService _hashingService;
+        private readonly TransactionService _transactionService;
         public List<Block> Chain { get; set; }
         public int Difficulty { get; private set; }
+        public int MaxBlockSizeBytes { get; } = 256;
 
         private readonly double _targetBlockTime;
         private readonly int _adjustmentInterval = 2;
-        private const double _miningDurationTolerance = 2.0; // seconds
+        private const double _miningDurationTolerance = 2.0;
 
         public BlockChainService(double targetBlockTime = 5)
         {
@@ -19,24 +21,37 @@ namespace BlockChain_01.Services
             Chain = new List<Block>();
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
+            _transactionService = new TransactionService();
             Difficulty = 1;
             CreateGenesisBlock();
         }
 
         private void CreateGenesisBlock()
         {
-            var genesisBlock = new Block(0, DateTime.UtcNow, "SYSTEM", "Genesis Block", "0", Difficulty);
+            var genesisBlock = new Block(0, DateTime.UtcNow, new List<Transaction>(), "0", Difficulty);
             _miningService.MineBlock(genesisBlock, Difficulty);
             Chain.Add(genesisBlock);
         }
 
-        public async Task<bool> AddBlockAsync(string author, string data,
+        public async Task<bool> AddBlockAsync(List<Transaction> transactions,
             CancellationToken cancellationToken = default)
         {
+            var (included, weight) = FitToByteLimit(transactions);
+
+            Console.WriteLine($"[Blockchain] Block size check: {included.Count}/{transactions.Count} tx included, weight {weight}/{MaxBlockSizeBytes} bytes.");
+
+            foreach (var transaction in included)
+            {
+                if (!_transactionService.ValidateTransaction(transaction).IsValid)
+                {
+                    throw new InvalidOperationException("Invalid Transaction");
+                }
+            }
+
             AdjustDifficulty();
 
             var lastBlock = Chain.Last();
-            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, author, data, lastBlock.Hash, Difficulty);
+            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, included, lastBlock.Hash, Difficulty);
 
             Console.WriteLine($"\n[Blockchain] Adding block ...");
 
@@ -49,9 +64,24 @@ namespace BlockChain_01.Services
             return true;
         }
 
-        public void AddBlock(string author, string data)
+        public void AddBlock(List<Transaction> transactions)
         {
-            AddBlockAsync(author, data).GetAwaiter().GetResult();
+            AddBlockAsync(transactions).GetAwaiter().GetResult();
+        }
+
+        private (List<Transaction> Included, int TotalBytes) FitToByteLimit(List<Transaction> transactions)
+        {
+            var included = new List<Transaction>();
+            int total = 0;
+            foreach (var tx in transactions)
+            {
+                int txBytes = System.Text.Encoding.UTF8.GetByteCount(tx.ToRawString());
+                if (total + txBytes > MaxBlockSizeBytes)
+                    break;
+                included.Add(tx);
+                total += txBytes;
+            }
+            return (included, total);
         }
 
         private void AdjustDifficulty()
@@ -60,9 +90,9 @@ namespace BlockChain_01.Services
             double avgTime = recentBlocks.Average(b => b.MiningDuration);
 
             if (avgTime < _targetBlockTime)
-                Difficulty = Difficulty + 1;           // max +1 per adjustment
+                Difficulty = Difficulty + 1;
             else if (avgTime > _targetBlockTime)
-                Difficulty = Math.Max(1, Difficulty - 1); // max -1, never below 1
+                Difficulty = Math.Max(1, Difficulty - 1);
         }
 
         public bool IsValid()
@@ -72,18 +102,14 @@ namespace BlockChain_01.Services
                 var cur = Chain[i];
                 var prev = Chain[i - 1];
 
-                // Hash integrity
                 if (cur.Hash != _hashingService.ComputeHash(cur)) return false;
                 if (cur.PreviousHash != prev.Hash) return false;
                 if (!cur.Hash.StartsWith(_miningService.VanityTarget)) return false;
 
-                // 1. MiningDuration cannot be negative
                 if (cur.MiningDuration < 0) return false;
 
-                // 2. Timestamp must go forward
                 if (cur.TimeStamp <= prev.TimeStamp) return false;
 
-                // 3. Cross-check: MiningDuration must not exceed physical timestamp diff + tolerance
                 double physicalDiff = (cur.TimeStamp - prev.TimeStamp).TotalSeconds;
                 if (cur.MiningDuration > physicalDiff + _miningDurationTolerance) return false;
             }

@@ -23,8 +23,14 @@ namespace BlockChain_01.Services
                 Console.WriteLine($"Nonce: {block.Nonce}");
                 Console.WriteLine($"TimeStamp: {block.TimeStamp}");
                 Console.WriteLine($"Generating Time: {block.MiningDuration}");
-                Console.WriteLine($"Initiator: {block.Author}");
-                Console.WriteLine($"Data: {block.Data}");
+                Console.WriteLine($"Data: ");
+                if (block.Transactions.Count == 0) { Console.WriteLine("[BlockChain Initiation - Genesis Block]"); }
+                else { 
+                    foreach (var transaction in block.Transactions)
+                    {
+                        Console.WriteLine(transaction.ToRawString());
+                    }
+                }
                 Console.WriteLine(new string('-', 50));
             }
         }
@@ -44,8 +50,15 @@ namespace BlockChain_01.Services
             Console.WriteLine($"Nonce: {block.Nonce}");
             Console.WriteLine($"TimeStamp: {block.TimeStamp}");
             Console.WriteLine($"Generating Time: {block.MiningDuration}");
-            Console.WriteLine($"Initiator: {block.Author}");
-            Console.WriteLine($"Data: {block.Data}");
+            Console.WriteLine($"Data: ");
+            if (block.Transactions.Count == 0) { Console.WriteLine("[BlockChain Initiation - Genesis Block]"); }
+            else
+            {
+                foreach (var transaction in block.Transactions)
+                {
+                    Console.WriteLine(transaction.ToRawString());
+                }
+            }
             Console.WriteLine(new string('-', 50));
         }
 
