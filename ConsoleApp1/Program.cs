@@ -107,7 +107,7 @@ void RunMalleabilityDemo()
     Console.WriteLine("\n=== Частина 3: Byte-ліміт блоку (MaxBlockSizeBytes) ===");
     var bigTxs = new List<Transaction>();
     for (int i = 0; i < 10; i++)
-        bigTxs.Add(new Transaction(new string('A', 20) + i, new string('B', 20) + i, 1000 + i));
+        bigTxs.Add(new Transaction(FakeAddress(2000 + i), FakeAddress(3000 + i), 1000 + i));
 
     blockchain.AddBlock(bigTxs);
     var lastBlock = blockchain.Chain.Last();
@@ -121,9 +121,28 @@ Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
 Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
 
 
-var trans1 = new Transaction("Alice", "Bob", 10);
-var trans2 = new Transaction("Bob", "Mark", 100);
-var trans3 = new Transaction("Anton", "Marie", 50);
+static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
+
+void RunSmartChunkingDemo()
+{
+    Console.WriteLine("=== Smart Chunking Demo: 15 valid transactions ===");
+    var txs = new List<Transaction>();
+    for (int i = 0; i < 15; i++)
+        txs.Add(new Transaction(FakeAddress(100 + i), FakeAddress(200 + i), 1 + i));
+
+    int before = blockchain.Chain.Count;
+    blockchain.ProcessTransactions(txs);
+    int after = blockchain.Chain.Count;
+    Console.WriteLine($"\nResult: {after - before} new block(s) mined, no transactions lost.");
+
+    Console.WriteLine("\n=== Invalid address rejection demo ===");
+    var badTx = new Transaction("Bob", FakeAddress(999), 5);
+    blockchain.ProcessTransactions(new List<Transaction> { badTx });
+}
+
+var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
+var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
+var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
 
 
 string? choice;
@@ -138,6 +157,7 @@ do
     Console.WriteLine("5: Get Block by Index");
     Console.WriteLine("6: Initiate testing");
     Console.WriteLine("7: Vanity Mining Demo");
+    Console.WriteLine("8: Smart Chunking + Address Validation Demo");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -212,6 +232,9 @@ do
         case "7":
             Console.WriteLine("FIX THIS.");
             //await TestVanityMining();
+            break;
+        case "8":
+            RunSmartChunkingDemo();
             break;
         default:
             if (choice != "0")

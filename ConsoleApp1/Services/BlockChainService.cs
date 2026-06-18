@@ -69,6 +69,49 @@ namespace BlockChain_01.Services
             AddBlockAsync(transactions).GetAwaiter().GetResult();
         }
 
+        public void ProcessTransactions(List<Transaction> incomingTransactions)
+        {
+            var batch = new List<Transaction>();
+            int weight = 0;
+            int blockCount = 0;
+
+            void FlushBatch()
+            {
+                if (batch.Count == 0) return;
+                AddBlock(new List<Transaction>(batch));
+                blockCount++;
+                Console.WriteLine($"[ProcessTransactions] Block #{blockCount} mined: {batch.Count} tx, {weight}/{MaxBlockSizeBytes} bytes.");
+                batch.Clear();
+                weight = 0;
+            }
+
+            foreach (var tx in incomingTransactions)
+            {
+                var (isValid, error) = _transactionService.ValidateTransaction(tx);
+                if (!isValid)
+                {
+                    Console.WriteLine($"[ProcessTransactions] Rejected tx ({tx.From} -> {tx.To}): {error}");
+                    continue;
+                }
+
+                int txBytes = System.Text.Encoding.UTF8.GetByteCount(tx.ToRawString());
+                if (txBytes > MaxBlockSizeBytes)
+                {
+                    Console.WriteLine($"[ProcessTransactions] Rejected tx: {txBytes} bytes exceeds block limit {MaxBlockSizeBytes}.");
+                    continue;
+                }
+
+                if (weight + txBytes > MaxBlockSizeBytes)
+                    FlushBatch();
+
+                batch.Add(tx);
+                weight += txBytes;
+            }
+
+            FlushBatch();
+            Console.WriteLine($"[ProcessTransactions] Done. Total blocks mined: {blockCount}.");
+        }
+
         private (List<Transaction> Included, int TotalBytes) FitToByteLimit(List<Transaction> transactions)
         {
             var included = new List<Transaction>();
