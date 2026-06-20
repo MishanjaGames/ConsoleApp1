@@ -20,6 +20,8 @@ namespace BlockChain_01.Models
 
         public string ToRawString()
         {
+            if (Signature == null)
+                return $"[{TimeStamp.ToString("O")}] {Id} | {From} -> {To} | {Amount} | {Convert.ToHexString(new byte[0])}";
             return $"[{TimeStamp.ToString("O")}] {Id} | {From} -> {To} | {Amount} | {Convert.ToHexString(Signature)}";
         }
 

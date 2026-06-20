@@ -4,6 +4,12 @@ using System.Text;
 
 var blockchain = new BlockChainService();
 var display = new BlockChainDisplayService(blockchain);
+var walletService = new WalletService(blockchain.Chain);
+var systemWallet = new WalletService(blockchain.Chain).CreateWallet("COINBASE");
+var transactionService = new TransactionService(blockchain);
+
+var users = new List<Wallet>();
+var walletRegistry = new Dictionary<string, Wallet>();
 
 /*
  * static void PrintResult(string testName, bool passed)
@@ -144,31 +150,78 @@ var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
 var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);*/
 
 Console.WriteLine("Blockchain initiated :)");
+
+void RunEconomyAudit()
+{
+    Console.WriteLine("=== Part 1: Attack Double Spend ===");
+    var bc = new BlockChainService();
+    var ws = new WalletService(bc.Chain);
+    var ts = new TransactionService(bc);
+    var aliceW = ws.CreateWallet("Alice");
+    var bobW = ws.CreateWallet("Bob");
+    var carloW = ws.CreateWallet("Carlo");
+    var minerW = ws.CreateWallet("Miner");
+
+    bc.MineBlock(new List<Transaction>(), aliceW.Address);
+    Console.WriteLine($"Balance of Alice: {ws.GetBalance(aliceW.Address)}");
+
+    var tx1 = ts.CreateTransaction(aliceW, bobW.Address, 50, aliceW.PublicKey);
+    var tx2 = ts.CreateTransaction(aliceW, carloW.Address, 50, aliceW.PublicKey);
+    try
+    {
+        bc.MineBlock(new List<Transaction> { tx1, tx2 }, minerW.Address);
+        Console.WriteLine("ERROR: attack had an effect!");
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.WriteLine($"Attack ended: {ex.Message}");
+    }
+
+    Console.WriteLine("\n=== Part 2: Hard Cap (MaxSupply=1000) ===");
+    for (int i = 1; i <= 22; i++)
+    {
+        bc.MineBlock(new List<Transaction>(), minerW.Address);
+        if (i is >= 18 and <= 21)
+            Console.WriteLine($"Block #{i}: TotalMinted={bc.TotalMinted}, Miners balance={ws.GetBalance(minerW.Address)}");
+    }
+
+    Console.WriteLine("\n=== Part 3: Audit of economics (Proof of Reserves) ===");
+    bool ok = bc.ValidateEconomy();
+    Console.WriteLine($"ValidateEconomy(): {ok}");
+}
+
 Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
 Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
 
-var w_Mark = new WalletService().CreateWallet("Mark");
-var w_Alice = new WalletService().CreateWallet("Alice");
-var w_John = new WalletService().CreateWallet("John");
-var w_Bob = new WalletService().CreateWallet("Bob");
+var w_Mark = walletService.CreateWallet("Mark");
+var w_Alice = walletService.CreateWallet("Alice");
+var device = walletService.CreateWallet("User");
+users.Add(w_Mark);
+users.Add(w_Alice);
+users.Add(device);
+walletRegistry["Mark"] = w_Mark;
+walletRegistry["Alice"] = w_Alice;
+walletRegistry[systemWallet.Name] = systemWallet;
+walletRegistry[device.Name] = device;
 
-var trans1 = new TransactionService().CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
-var trans2 = new TransactionService().CreateTransaction(w_Alice, w_John.Address, 40, w_Alice.PublicKey);
-var trans3 = new TransactionService().CreateTransaction(w_John, w_Bob.Address, 100, w_John.PublicKey);
+
 
 string? choice;
 
 do
 {
     Console.WriteLine(new string('=', 50));
+    Console.WriteLine($"|| {device.Name}:{walletService.GetBalance(device.Address)} ||");
+    Console.WriteLine(new string('=', 50));
     Console.WriteLine("1: Display Blockchain");
-    Console.WriteLine("2: Add Block (multithreaded)");
-    Console.WriteLine("3: Add Block in simulated net");
-    Console.WriteLine("4: Validate BlockChain");
-    Console.WriteLine("5: Get Block by Index");
-    Console.WriteLine("6: Initiate testing");
-    Console.WriteLine("7: Vanity Mining Demo");
-    Console.WriteLine("8: Smart Chunking + Address Validation Demo");
+    Console.WriteLine("2: Add Block");
+    Console.WriteLine("3: Add Transaction");
+    Console.WriteLine("4: View Banace");
+    Console.WriteLine("5: Validate BlockChain");
+    Console.WriteLine("6: Get Block by Index");
+    Console.WriteLine("7: Initiate testing");
+    Console.WriteLine("8: Vanity Mining Demo");
+    Console.WriteLine("9: Smart Chunking + Address Validation Demo");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -181,48 +234,105 @@ do
             break;
 
         case "2":
-            Console.Write("How many coins to generate: ");
-            if (!int.TryParse(Console.ReadLine(), out int c)) break;
-
-            for (int i = 0; i < c; i++)
+            var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
+            var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
+            if (trans == null || trans1 == null)
             {
-                await blockchain.AddBlockAsync(new List<Transaction> { trans1, trans2, trans3 });
+                Console.WriteLine("Transaction creation failed. Check balances and try again.");
+                break;
+            }
+            Console.Write("Enter (1) for multithreaded (2) for generating in net: ");
+            string select = Console.ReadLine() ?? "";
+            if (select == "1")
+            {
+                Console.Write("How many coins to generate: ");
+                if (!int.TryParse(Console.ReadLine(), out int c)) break;
+
+                for (int i = 0; i < c; i++)
+                {
+                    await blockchain.MineBlockAsync(new List<Transaction> { trans, trans1 }, device.Address);
+                }
+            }
+            else if (select == "2")
+            {
+                Console.Write("How many coins to generate: ");
+                if (!int.TryParse(Console.ReadLine(), out int count)) break;
+
+                for (int i = 0; i < count; i++)
+                {
+                    using var cts = new CancellationTokenSource();
+
+                    var networkSimTask = Task.Run(async () =>
+                    {
+                        int delay = Random.Shared.Next(2000, 8000);
+                        Console.WriteLine($"[Network] Other node is generating block. Awaiting answer in ~{delay / 1000}s");
+                        await Task.Delay(delay);
+                        if (!cts.Token.IsCancellationRequested)
+                        {
+                            Console.WriteLine("\n[Network] Block already generated. Canceling...");
+                            cts.Cancel();
+                        }
+                    });
+
+                    bool mined = await blockchain.MineBlockAsync(new List<Transaction> { trans, trans1 }, device.Address, cts.Token);
+
+                    if (mined)
+                    {
+                        Console.WriteLine("[Network] Block generated. Adding it.");
+                        cts.Cancel();
+                    }
+
+                    try { await networkSimTask; } catch { }
+                }
+            }
+            else
+            {
+                Console.WriteLine("Wrong input");
             }
             break;
 
         case "3":
-            Console.Write("How many coins to generate: ");
-            if (!int.TryParse(Console.ReadLine(), out int count)) break;
+            Console.Write("From (wallet name): ");
+            string from = Console.ReadLine() ?? "";
+            Console.Write("To (wallet name or address): ");
+            string to = Console.ReadLine() ?? "";
+            Console.Write("Amount: ");
+            if (!decimal.TryParse(Console.ReadLine(), out decimal amount)) break;
 
-            for (int i = 0; i < count; i++)
+            if (!walletRegistry.ContainsKey(from))
             {
-                using var cts = new CancellationTokenSource();
-
-                var networkSimTask = Task.Run(async () =>
-                {
-                    int delay = Random.Shared.Next(2000, 8000);
-                    Console.WriteLine($"[Network] Other node is generating block. Awaiting answer in ~{delay / 1000}s");
-                    await Task.Delay(delay);
-                    if (!cts.Token.IsCancellationRequested)
-                    {
-                        Console.WriteLine("\n[Network] Block already generated. Canceling...");
-                        cts.Cancel();
-                    }
-                });
-
-                bool mined = await blockchain.AddBlockAsync(new List<Transaction> { trans1, trans2, trans3 }, cts.Token);
-
-                if (mined)
-                {
-                    Console.WriteLine("[Network] Block generated. Adding it.");
-                    cts.Cancel();
-                }
-
-                try { await networkSimTask; } catch { }
+                Console.WriteLine($"Wallet '{from}' not found. Available wallets: {string.Join(", ", walletRegistry.Keys)}");
+                break;
             }
+
+            var walletFrom = walletRegistry[from];
+
+            // Convert wallet name to address if needed
+            string toAddress = to;
+            if (walletRegistry.ContainsKey(to))
+            {
+                toAddress = walletRegistry[to].Address;
+            }
+
+            var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
+            if (transaction == null)
+            {
+                Console.WriteLine("Transaction creation failed.");
+                break;
+            }
+            blockchain.ProcessTransactions(new List<Transaction> { transaction }, device.Address);
             break;
 
         case "4":
+            Console.WriteLine("\n=== Wallet Balances ===");
+            foreach (var kvp in walletRegistry)
+            {
+                decimal balance = walletService.GetBalance(kvp.Value.Address);
+                Console.WriteLine($"{kvp.Key}: {balance}");
+            }
+            break;
+
+        case "5":
             if (blockchain.IsValid())
                 Console.WriteLine("All Blockchain is valid");
             else
@@ -232,20 +342,19 @@ do
             }
             break;
 
-        case "5":
+        case "6":
             Console.Write("Block Index: ");
             if (int.TryParse(Console.ReadLine(), out int idx))
                 display.PrintBlock(null, null, idx - 1);
             break;
-        case "6":
-            Console.WriteLine("FIX THIS.");
-            //RunMalleabilityDemo();
-            break;
         case "7":
+            RunEconomyAudit();
+            break;
+        case "8":
             Console.WriteLine("FIX THIS.");
             //await TestVanityMining();
             break;
-        case "8":
+        case "9":
             Console.WriteLine("FIX THIS.");
             //RunSmartChunkingDemo();
             break;
