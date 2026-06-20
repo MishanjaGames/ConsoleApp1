@@ -1,86 +1,89 @@
 ﻿using BlockChain_01.Models;
 using BlockChain_01.Services;
-
-//static void PrintResult(string testName, bool passed)
-//{
-//    string status = passed ? "[TEST COMPLETED]" : "[TEST FAILED]";
-//    Console.WriteLine($"{status} {testName}\n");
-//}
-//void TestSystem()
-//{
-//    Console.WriteLine("=== Test 1: Default workload ===");
-//    var bc = new BlockChainService();
-//    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-//    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-//    bc.AddBlock("Carol", "TX: Carol->Alice: 2");
-//    bool valid = bc.IsValid();
-//    Console.WriteLine($"IsValid = {valid}");
-//    PrintResult("Default workload", valid == true);
-
-//    Console.WriteLine("=== Test 2: Corrupted Duration ===");
-//    bc = new BlockChainService();
-//    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-//    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-
-//    Block last = bc.Chain.Last();
-//    last.MiningDuration = 9999;
-//    var hs = new HashingService();
-//    last.Hash = hs.ComputeHash(last);
-
-//    valid = bc.IsValid();
-//    Console.WriteLine($"IsValid = {valid} — Duration Corrupted!");
-//    PrintResult("[Attack]: Corrupted Duration", valid == false);
-
-//    Console.WriteLine("=== Test 3: Negative Duration ===");
-//    bc = new BlockChainService();
-//    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-//    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-
-//    last = bc.Chain.Last();
-//    last.MiningDuration = -10;
-//    hs = new HashingService();
-//    last.Hash = hs.ComputeHash(last);
-
-//    valid = bc.IsValid();
-//    Console.WriteLine($"IsValid = {valid}");
-//    PrintResult("[Attack]: Negative Duration", valid == false);
-
-//    Console.WriteLine("=== Test 4: Difficulty limit ===");
-//    bc = new BlockChainService(targetBlockTime: 500);
-//    Console.WriteLine($"Initial difficulty: {bc.Difficulty}");
-
-//    bc.AddBlock("A", "block 1");
-//    bc.AddBlock("B", "block 2");
-//    bc.AddBlock("C", "block 3");
-//    bc.AddBlock("D", "block 4");
-
-//    int d = bc.Difficulty;
-//    Console.WriteLine($"Difficulty after 4 blocks: {d}");
-//    Console.WriteLine($"Max possible with +1 limit: 5");
-
-//    bool limitHeld = d >= 2 && d <= 5;
-//    PrintResult("[Attack]: Difficulty limit", limitHeld);
-//}
-
-//async Task TestVanityMining()
-//{
-//    Console.WriteLine("=== Vanity Mining Demo (target prefix: \"cafe\") ===");
-//    var bc = new BlockChainService();
-//    await bc.AddBlockAsync("Alice", "TX: Alice->Bob: 10");
-//    await bc.AddBlockAsync("Bob", "TX: Bob->Carol: 5");
-//    await bc.AddBlockAsync("Carol", "TX: Carol->Alice: 2");
-
-//    foreach (var b in bc.Chain)
-//        Console.WriteLine($"Index {b.Index} | Hash: {b.Hash}");
-
-//    PrintResult("Vanity Mining", bc.IsValid());
-//}
-
+using System.Text;
 
 var blockchain = new BlockChainService();
 var display = new BlockChainDisplayService(blockchain);
 
-void RunMalleabilityDemo()
+/*
+ * static void PrintResult(string testName, bool passed)
+{
+    string status = passed ? "[TEST COMPLETED]" : "[TEST FAILED]";
+    Console.WriteLine($"{status} {testName}\n");
+}
+void TestSystem()
+{
+    Console.WriteLine("=== Test 1: Default workload ===");
+    var bc = new BlockChainService();
+    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
+    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
+    bc.AddBlock("Carol", "TX: Carol->Alice: 2");
+    bool valid = bc.IsValid();
+    Console.WriteLine($"IsValid = {valid}");
+    PrintResult("Default workload", valid == true);
+
+    Console.WriteLine("=== Test 2: Corrupted Duration ===");
+    bc = new BlockChainService();
+    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
+    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
+
+    Block last = bc.Chain.Last();
+    last.MiningDuration = 9999;
+    var hs = new HashingService();
+    last.Hash = hs.ComputeHash(last);
+
+    valid = bc.IsValid();
+    Console.WriteLine($"IsValid = {valid} — Duration Corrupted!");
+    PrintResult("[Attack]: Corrupted Duration", valid == false);
+
+    Console.WriteLine("=== Test 3: Negative Duration ===");
+    bc = new BlockChainService();
+    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
+    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
+
+    last = bc.Chain.Last();
+    last.MiningDuration = -10;
+    hs = new HashingService();
+    last.Hash = hs.ComputeHash(last);
+
+    valid = bc.IsValid();
+    Console.WriteLine($"IsValid = {valid}");
+    PrintResult("[Attack]: Negative Duration", valid == false);
+
+    Console.WriteLine("=== Test 4: Difficulty limit ===");
+    bc = new BlockChainService(targetBlockTime: 500);
+    Console.WriteLine($"Initial difficulty: {bc.Difficulty}");
+
+    bc.AddBlock("A", "block 1");
+    bc.AddBlock("B", "block 2");
+    bc.AddBlock("C", "block 3");
+    bc.AddBlock("D", "block 4");
+
+    int d = bc.Difficulty;
+    Console.WriteLine($"Difficulty after 4 blocks: {d}");
+    Console.WriteLine($"Max possible with +1 limit: 5");
+
+    bool limitHeld = d >= 2 && d <= 5;
+    PrintResult("[Attack]: Difficulty limit", limitHeld);
+}
+
+async Task TestVanityMining()
+{
+    Console.WriteLine("=== Vanity Mining Demo (target prefix: \"cafe\") ===");
+    var bc = new BlockChainService();
+    await bc.AddBlockAsync("Alice", "TX: Alice->Bob: 10");
+    await bc.AddBlockAsync("Bob", "TX: Bob->Carol: 5");
+    await bc.AddBlockAsync("Carol", "TX: Carol->Alice: 2");
+
+    foreach (var b in bc.Chain)
+        Console.WriteLine($"Index {b.Index} | Hash: {b.Hash}");
+
+    PrintResult("Vanity Mining", bc.IsValid());
+}*/
+
+
+/*
+ * void RunMalleabilityDemo()
 {
     Console.WriteLine("=== Частина 1: Атака колізії (наївна конкатенація From+To+Amount) ===");
     static string NaiveId(string from, string to, decimal amount)
@@ -114,14 +117,10 @@ void RunMalleabilityDemo()
     int weight = lastBlock.Transactions.Sum(t => System.Text.Encoding.UTF8.GetByteCount(t.ToRawString()));
     Console.WriteLine($"Передано транзакцій: {bigTxs.Count}, влізло у блок: {lastBlock.Transactions.Count}");
     Console.WriteLine($"Фінальна вага блоку: {weight} байт (ліміт {blockchain.MaxBlockSizeBytes})");
-}
-
-Console.WriteLine("Blockchain initiated :)");
-Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
-Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
+}*/
 
 
-static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
+/*static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
 
 void RunSmartChunkingDemo()
 {
@@ -142,8 +141,20 @@ void RunSmartChunkingDemo()
 
 var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
 var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
-var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
+var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);*/
 
+Console.WriteLine("Blockchain initiated :)");
+Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
+Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
+
+var w_Mark = new WalletService().CreateWallet("Mark");
+var w_Alice = new WalletService().CreateWallet("Alice");
+var w_John = new WalletService().CreateWallet("John");
+var w_Bob = new WalletService().CreateWallet("Bob");
+
+var trans1 = new TransactionService().CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
+var trans2 = new TransactionService().CreateTransaction(w_Alice, w_John.Address, 40, w_Alice.PublicKey);
+var trans3 = new TransactionService().CreateTransaction(w_John, w_Bob.Address, 100, w_John.PublicKey);
 
 string? choice;
 
@@ -227,14 +238,16 @@ do
                 display.PrintBlock(null, null, idx - 1);
             break;
         case "6":
-            RunMalleabilityDemo();
+            Console.WriteLine("FIX THIS.");
+            //RunMalleabilityDemo();
             break;
         case "7":
             Console.WriteLine("FIX THIS.");
             //await TestVanityMining();
             break;
         case "8":
-            RunSmartChunkingDemo();
+            Console.WriteLine("FIX THIS.");
+            //RunSmartChunkingDemo();
             break;
         default:
             if (choice != "0")

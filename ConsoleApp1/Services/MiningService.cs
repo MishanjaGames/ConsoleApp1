@@ -6,7 +6,6 @@ namespace BlockChain_01.Services
     public class MiningService
     {
         private readonly HashingService _hashingService;
-
         public string VanityTarget { get; set; } = "00";
         public bool useDifficulty { get; } = true;
 

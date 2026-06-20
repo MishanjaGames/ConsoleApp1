@@ -36,11 +36,10 @@ namespace BlockChain_01.Services
         public async Task<bool> AddBlockAsync(List<Transaction> transactions,
             CancellationToken cancellationToken = default)
         {
-            var (included, weight) = FitToByteLimit(transactions);
+            //var (included, weight) = FitToByteLimit(transactions);
 
-            Console.WriteLine($"[Blockchain] Block size check: {included.Count}/{transactions.Count} tx included, weight {weight}/{MaxBlockSizeBytes} bytes.");
 
-            foreach (var transaction in included)
+            foreach (var transaction in transactions)
             {
                 if (!_transactionService.ValidateTransaction(transaction).IsValid)
                 {
@@ -51,7 +50,7 @@ namespace BlockChain_01.Services
             AdjustDifficulty();
 
             var lastBlock = Chain.Last();
-            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, included, lastBlock.Hash, Difficulty);
+            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, transactions, lastBlock.Hash, Difficulty);
 
             Console.WriteLine($"\n[Blockchain] Adding block ...");
 
