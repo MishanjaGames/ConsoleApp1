@@ -17,17 +17,18 @@ namespace BlockChain_01.Models
         public DateTime TimeStamp { get; set; }
         public byte[] SenderPublicKey { get; set; }
         public byte[] Signature { get; set; }
+        public decimal Fee { get; set; }
 
         public string ToRawString()
         {
             if (Signature == null)
-                return $"[{TimeStamp.ToString("O")}] {Id} | {From} -> {To} | {Amount} | {Convert.ToHexString(new byte[0])}";
-            return $"[{TimeStamp.ToString("O")}] {Id} | {From} -> {To} | {Amount} | {Convert.ToHexString(Signature)}";
+                return $"[{TimeStamp.ToString("O")}] {Id} | {From:10} -> {To:10} | {Amount} | {Fee} | {Convert.ToHexString(new byte[0])}";
+            return $"[{TimeStamp.ToString("O")}] {Id} | {From:10} -> {To:10} | {Amount} | {Fee} | {Convert.ToHexString(Signature)}";
         }
 
         public byte[] GetDataToSign()
         {
-            return Encoding.UTF8.GetBytes($"[{TimeStamp.ToString("O")}] {Id} | {From} -> {To} | {Amount}");
+            return Encoding.UTF8.GetBytes($"[{TimeStamp.ToString("O")}] {Id:10} | {From:10} -> {To:10} | {Amount} | {Fee}");
         }
 
         public Transaction(string from, string to, decimal amount, byte[] senderPublicKey)
@@ -36,7 +37,7 @@ namespace BlockChain_01.Models
             To = to;
             Amount = amount;
             TimeStamp = DateTime.UtcNow;
-            Id = new HashingService().ComputeHash_P($"{From}>|>{To}|{Amount}");
+            Id = new HashingService().ComputeHash_P($"{From}>|>{To}|{Amount}|{Fee}");
             SenderPublicKey = senderPublicKey;
         }
     }

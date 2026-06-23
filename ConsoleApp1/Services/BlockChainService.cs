@@ -7,7 +7,9 @@ namespace BlockChain_01.Services
         private readonly MiningService _miningService;
         private readonly HashingService _hashingService;
         private readonly TransactionService _transactionService;
+        private readonly WalletService _walletService;
         public List<Block> Chain { get; set; }
+        public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
         public int Difficulty { get; private set; }
         public int MaxBlockSizeBytes { get; } = 10240;
         public decimal MaxSupply { get; } = 1000;
@@ -17,6 +19,7 @@ namespace BlockChain_01.Services
         private readonly int _adjustmentInterval = 2;
         private const double _miningDurationTolerance = 2.0;
         private readonly decimal _miningReward = 50m;
+        private readonly decimal maxTransactionAmount = 2m;
         public BlockChainService(double targetBlockTime = 5)
         {
             _targetBlockTime = targetBlockTime;
@@ -24,6 +27,7 @@ namespace BlockChain_01.Services
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
             _transactionService = new TransactionService(this);
+            _walletService = new WalletService(Chain);
             Difficulty = 1;
             CreateGenesisBlock();
         }
@@ -35,7 +39,7 @@ namespace BlockChain_01.Services
             Chain.Add(genesisBlock);
         }
 
-        public async Task<bool> MineBlockAsync(List<Transaction> transactions, string miningAddress,
+        public async Task<bool> MineBlockAsync(string miningAddress,
             CancellationToken cancellationToken = default)
         {
             //var (included, weight) = FitToByteLimit(transactions);
@@ -43,7 +47,10 @@ namespace BlockChain_01.Services
             var spentWallet = new WalletService(Chain);
             var tempBalances = new Dictionary<string, decimal>();
 
-            foreach (var transaction in transactions)
+            var sortedTransactions = PendingTransactions.OrderByDescending(tx => tx.Fee).ToList();
+            var totalreward = sortedTransactions.Sum(tx => tx.Fee) + _miningReward;
+
+            foreach (var transaction in PendingTransactions)
             {
                 if (!_transactionService.ValidateTransaction(transaction).IsValid)
                 {
@@ -70,7 +77,7 @@ namespace BlockChain_01.Services
             AdjustDifficulty();
 
             var lastBlock = Chain.Last();
-            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, transactions, lastBlock.Hash, Difficulty);
+            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, sortedTransactions, lastBlock.Hash, Difficulty);
 
             Console.WriteLine($"\n[Blockchain] Adding block ...");
 
@@ -79,8 +86,8 @@ namespace BlockChain_01.Services
 
             if (rewardAmount > 0)
             {
-                var reward = new Transaction("COINBASE", miningAddress, rewardAmount, new byte[0]);
-                transactions.Add(reward);
+                var reward = new Transaction("COINBASE", miningAddress, totalreward, new byte[0]);
+                PendingTransactions.Add(reward);
                 TotalMinted += rewardAmount;
             }
             else
@@ -94,12 +101,13 @@ namespace BlockChain_01.Services
                 return false;
 
             Chain.Add(newBlock);
+            PendingTransactions.RemoveAll(tx => sortedTransactions.Contains(tx));
             return true;
         }
 
-        public void MineBlock(List<Transaction> transactions, string miningAddress)
+        public void MineBlock(string miningAddress)
         {
-            MineBlockAsync(transactions, miningAddress).GetAwaiter().GetResult();
+            MineBlockAsync(miningAddress).GetAwaiter().GetResult();
         }
 
         public void ProcessTransactions(List<Transaction> incomingTransactions, string miningAddress)
@@ -111,7 +119,7 @@ namespace BlockChain_01.Services
             void FlushBatch()
             {
                 if (batch.Count == 0) return;
-                MineBlock(new List<Transaction>(batch), miningAddress);
+                MineBlock(miningAddress);
                 blockCount++;
                 Console.WriteLine($"[ProcessTransactions] Block #{blockCount} mined: {batch.Count} tx, {weight}/{MaxBlockSizeBytes} bytes.");
                 batch.Clear();
@@ -137,7 +145,7 @@ namespace BlockChain_01.Services
                 if (weight + txBytes > MaxBlockSizeBytes)
                     FlushBatch();
 
-                batch.Add(tx);
+                AddTransactionToMempool(tx);
                 weight += txBytes;
             }
 
@@ -230,6 +238,70 @@ namespace BlockChain_01.Services
             return totalOnWallets == TotalMinted;
         }
 
+        public int MaxMempoolSize { get; } = 5;
 
+        public decimal GetPendingBalance(string address)
+        {
+            decimal balance = _walletService.GetBalance(address);
+            foreach (var tx in PendingTransactions)
+            {
+                if (tx.From == address)
+                    balance -= (tx.Amount + tx.Fee);
+            }
+            return balance;
+        }
+
+        public void AddTransactionToMempool(Transaction transaction)
+        {
+            var (isValid, error) = _transactionService.ValidateTransaction(transaction);
+            if (!isValid)
+                throw new InvalidOperationException($"Invalid transaction: {error}");
+
+            if (transaction.From != "COINBASE")
+            {
+                // Part 3: use pending balance
+                var pendingBalance = GetPendingBalance(transaction.From);
+                if (pendingBalance < transaction.Amount + transaction.Fee)
+                    throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingBalance}, tried to spend {transaction.Amount + transaction.Fee}");
+
+                // Part 2: RBF check
+                var existing = PendingTransactions.FirstOrDefault(tx =>
+                    tx.From == transaction.From &&
+                    tx.To == transaction.To &&
+                    tx.Amount == transaction.Amount);
+
+                if (existing != null)
+                {
+                    if (transaction.Fee > existing.Fee)
+                    {
+                        PendingTransactions.Remove(existing);
+                        PendingTransactions.Add(transaction);
+                        Console.WriteLine("Transaction has been updated with higher fee!");
+                        return;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("A similar transaction already exists. Increase fee to replace.");
+                    }
+                }
+            }
+
+            // Part 1: Mempool eviction
+            if (PendingTransactions.Count >= MaxMempoolSize)
+            {
+                var cheapest = PendingTransactions.OrderBy(tx => tx.Fee).First();
+                if (transaction.Fee > cheapest.Fee)
+                {
+                    PendingTransactions.Remove(cheapest);
+                    Console.WriteLine($"[Mempool] Evicted tx with fee={cheapest.Fee} to make room.");
+                }
+                else
+                {
+                    throw new InvalidOperationException("Mempool is full. Fee is too low.");
+                }
+            }
+
+            PendingTransactions.Add(transaction);
+        }
     }
 }

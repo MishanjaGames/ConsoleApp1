@@ -12,7 +12,7 @@ var users = new List<Wallet>();
 var walletRegistry = new Dictionary<string, Wallet>();
 
 /*
- * static void PrintResult(string testName, bool passed)
+static void PrintResult(string testName, bool passed)
 {
     string status = passed ? "[TEST COMPLETED]" : "[TEST FAILED]";
     Console.WriteLine($"{status} {testName}\n");
@@ -85,10 +85,9 @@ async Task TestVanityMining()
         Console.WriteLine($"Index {b.Index} | Hash: {b.Hash}");
 
     PrintResult("Vanity Mining", bc.IsValid());
-}*/
+}
 
 
-/*
  * void RunMalleabilityDemo()
 {
     Console.WriteLine("=== Частина 1: Атака колізії (наївна конкатенація From+To+Amount) ===");
@@ -123,10 +122,10 @@ async Task TestVanityMining()
     int weight = lastBlock.Transactions.Sum(t => System.Text.Encoding.UTF8.GetByteCount(t.ToRawString()));
     Console.WriteLine($"Передано транзакцій: {bigTxs.Count}, влізло у блок: {lastBlock.Transactions.Count}");
     Console.WriteLine($"Фінальна вага блоку: {weight} байт (ліміт {blockchain.MaxBlockSizeBytes})");
-}*/
+}
 
 
-/*static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
+static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
 
 void RunSmartChunkingDemo()
 {
@@ -147,9 +146,8 @@ void RunSmartChunkingDemo()
 
 var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
 var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
-var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);*/
+var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
 
-Console.WriteLine("Blockchain initiated :)");
 
 void RunEconomyAudit()
 {
@@ -189,6 +187,147 @@ void RunEconomyAudit()
     bool ok = bc.ValidateEconomy();
     Console.WriteLine($"ValidateEconomy(): {ok}");
 }
+*/
+
+async Task RunMempoolDemo()
+{
+    Console.WriteLine("\n" + new string('=', 60));
+    Console.WriteLine("=== MEMPOOL DEMO: DDoS + RBF + Shadow Balance ===");
+    Console.WriteLine(new string('=', 60));
+
+    var bc = new BlockChainService();
+    var ws = new WalletService(bc.Chain);
+    var ts = new TransactionService(bc);
+
+    var hacker = ws.CreateWallet("Hacker");
+    var alice = ws.CreateWallet("Alice");
+    var bob = ws.CreateWallet("Bob");
+    var carlo = ws.CreateWallet("Carlo");
+    var miner = ws.CreateWallet("Miner");
+
+    // Fund wallets: mine 2 blocks to alice, 2 to bob
+    Console.WriteLine("\n[Setup] Mining initial blocks to fund wallets...");
+    await bc.MineBlockAsync(alice.Address);
+    await bc.MineBlockAsync(alice.Address);
+    await bc.MineBlockAsync(bob.Address);
+    await bc.MineBlockAsync(bob.Address);
+    // Clear mempool coinbase txs by mining them
+    await bc.MineBlockAsync(miner.Address);
+
+    Console.WriteLine($"[Setup] Alice balance: {ws.GetBalance(alice.Address)}");
+    Console.WriteLine($"[Setup] Bob balance:   {ws.GetBalance(bob.Address)}");
+
+    // ── Part 1: Spam / DDoS ──────────────────────────────────────
+    Console.WriteLine("\n--- Part 1: DDoS Spam Attack (10 txs, Fee=0) ---");
+    int spamAccepted = 0, spamRejected = 0;
+    for (int i = 0; i < 10; i++)
+    {
+        try
+        {
+
+            var spamTx = ts.CreateTransaction(alice, hacker.Address, 1, alice.PublicKey);
+            spamTx.GetType().GetProperty("Fee")?.SetValue(spamTx, 0m);
+
+            var rawSpam = new Transaction(alice.Address, hacker.Address, 1, alice.PublicKey);
+            rawSpam.Fee = 0;
+            rawSpam.Signature = alice.Sign(rawSpam.GetDataToSign());
+            bc.AddTransactionToMempool(rawSpam);
+            spamAccepted++;
+            Console.WriteLine($"  Spam tx #{i + 1}: ACCEPTED (mempool={bc.PendingTransactions.Count})");
+        }
+        catch (Exception ex)
+        {
+            spamRejected++;
+            Console.WriteLine($"  Spam tx #{i + 1}: REJECTED — {ex.Message}");
+        }
+    }
+    Console.WriteLine($"[Result] Accepted={spamAccepted}, Rejected={spamRejected}, Mempool size={bc.PendingTransactions.Count}/{bc.MaxMempoolSize}");
+
+    // ── Part 2a: Alice evicts cheapest spam ───────────────────────
+    Console.WriteLine("\n--- Part 2: Alice sends tx with Fee=10 (evicts cheapest spam) ---");
+    try
+    {
+        var aliceTx = new Transaction(alice.Address, carlo.Address, 5, alice.PublicKey);
+        aliceTx.Fee = 10;
+        aliceTx.Signature = alice.Sign(aliceTx.GetDataToSign());
+        bc.AddTransactionToMempool(aliceTx);
+        Console.WriteLine($"[Result] Alice tx ACCEPTED. Mempool size={bc.PendingTransactions.Count}");
+        Console.WriteLine($"  Min fee in mempool: {bc.PendingTransactions.Min(t => t.Fee)}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Result] Alice tx REJECTED — {ex.Message}");
+    }
+
+    // ── Part 2b: RBF ─────────────────────────────────────────────
+    Console.WriteLine("\n--- Part 3: RBF — Bob sends 20 to Carlo, Fee=1, then bumps to Fee=15 ---");
+    try
+    {
+        var bobTx1 = new Transaction(bob.Address, carlo.Address, 20, bob.PublicKey);
+        bobTx1.Fee = 1;
+        bobTx1.Signature = bob.Sign(bobTx1.GetDataToSign());
+        bc.AddTransactionToMempool(bobTx1);
+        Console.WriteLine($"  Bob tx1 (Fee=1) ACCEPTED. Mempool={bc.PendingTransactions.Count}");
+    }
+    catch (Exception ex) { Console.WriteLine($"  Bob tx1 REJECTED — {ex.Message}"); }
+
+    try
+    {
+        var bobTx2 = new Transaction(bob.Address, carlo.Address, 20, bob.PublicKey);
+        bobTx2.Fee = 15;
+        bobTx2.Signature = bob.Sign(bobTx2.GetDataToSign());
+        bc.AddTransactionToMempool(bobTx2);
+        Console.WriteLine($"  Bob tx2 (Fee=15) — RBF applied. Mempool={bc.PendingTransactions.Count}");
+    }
+    catch (Exception ex) { Console.WriteLine($"  Bob tx2 REJECTED — {ex.Message}"); }
+
+    // ── Part 3: Shadow / Pending Balance ─────────────────────────
+    Console.WriteLine("\n--- Part 4: Shadow Balance — Alice tries to double-spend via mempool ---");
+    Console.WriteLine($"  Alice confirmed balance: {ws.GetBalance(alice.Address)}");
+    Console.WriteLine($"  Alice pending balance:   {bc.GetPendingBalance(alice.Address)}");
+
+    // Alice already has a pending tx (5 + fee=10 = 15 reserved).
+    // Try to send another large amount that would exceed pending balance.
+    try
+    {
+        var aliceTx2 = new Transaction(alice.Address, bob.Address, 90, alice.PublicKey);
+        aliceTx2.Fee = 5;
+        aliceTx2.Signature = alice.Sign(aliceTx2.GetDataToSign());
+        bc.AddTransactionToMempool(aliceTx2);
+        Console.WriteLine("  Alice tx2: ACCEPTED (unexpected)");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  Alice tx2 REJECTED (shadow balance protection) — {ex.Message}");
+    }
+
+    // ── Part 4: Miner picks top 2 txs ────────────────────────────
+    Console.WriteLine("\n--- Part 5: Miner mines block (takes top fee txs) ---");
+    Console.WriteLine($"  Mempool before mining ({bc.PendingTransactions.Count} txs):");
+    foreach (var tx in bc.PendingTransactions.OrderByDescending(t => t.Fee))
+        Console.WriteLine($"    {tx.From[..8]}... -> {tx.To[..8]}... | Amount={tx.Amount} Fee={tx.Fee}");
+
+    // Limit block to 2 txs by temporarily working with top 2
+    var top2 = bc.PendingTransactions.OrderByDescending(t => t.Fee).Take(2).ToList();
+    var remaining = bc.PendingTransactions.Except(top2).ToList();
+    bc.PendingTransactions.Clear();
+    foreach (var tx in top2) bc.PendingTransactions.Add(tx);
+
+    await bc.MineBlockAsync(miner.Address);
+
+    // Restore remaining spam to mempool
+    foreach (var tx in remaining) bc.PendingTransactions.Add(tx);
+
+    Console.WriteLine($"\n  Mempool after mining ({bc.PendingTransactions.Count} txs remain — spam stays):");
+    foreach (var tx in bc.PendingTransactions)
+        Console.WriteLine($"    Fee={tx.Fee}");
+
+    Console.WriteLine("\n" + new string('=', 60));
+    Console.WriteLine("=== DEMO COMPLETE ===");
+    Console.WriteLine(new string('=', 60) + "\n");
+}
+
+Console.WriteLine("Blockchain initiated :)");
 
 Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
 Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
@@ -203,8 +342,6 @@ walletRegistry["Mark"] = w_Mark;
 walletRegistry["Alice"] = w_Alice;
 walletRegistry[systemWallet.Name] = systemWallet;
 walletRegistry[device.Name] = device;
-
-
 
 string? choice;
 
@@ -234,13 +371,13 @@ do
             break;
 
         case "2":
-            var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
-            var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
-            if (trans == null || trans1 == null)
-            {
-                Console.WriteLine("Transaction creation failed. Check balances and try again.");
-                break;
-            }
+            //var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
+            //var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
+            //if (trans == null || trans1 == null)
+            //{
+            //    Console.WriteLine("Transaction creation failed. Check balances and try again.");
+            //    break;
+            //}
             Console.Write("Enter (1) for multithreaded (2) for generating in net: ");
             string select = Console.ReadLine() ?? "";
             if (select == "1")
@@ -250,7 +387,7 @@ do
 
                 for (int i = 0; i < c; i++)
                 {
-                    await blockchain.MineBlockAsync(new List<Transaction> { trans, trans1 }, device.Address);
+                    await blockchain.MineBlockAsync(device.Address);
                 }
             }
             else if (select == "2")
@@ -274,7 +411,7 @@ do
                         }
                     });
 
-                    bool mined = await blockchain.MineBlockAsync(new List<Transaction> { trans, trans1 }, device.Address, cts.Token);
+                    bool mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
 
                     if (mined)
                     {
@@ -314,13 +451,22 @@ do
                 toAddress = walletRegistry[to].Address;
             }
 
-            var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
-            if (transaction == null)
+            try
             {
-                Console.WriteLine("Transaction creation failed.");
-                break;
+                var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
+                if (transaction == null)
+                {
+                    Console.WriteLine("Transaction creation failed.");
+                    break;
+                }
+
+                // Add transaction to mempool
+                blockchain.AddTransactionToMempool(transaction);
             }
-            blockchain.ProcessTransactions(new List<Transaction> { transaction }, device.Address);
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
             break;
 
         case "4":
@@ -348,7 +494,7 @@ do
                 display.PrintBlock(null, null, idx - 1);
             break;
         case "7":
-            RunEconomyAudit();
+            await RunMempoolDemo();
             break;
         case "8":
             Console.WriteLine("FIX THIS.");

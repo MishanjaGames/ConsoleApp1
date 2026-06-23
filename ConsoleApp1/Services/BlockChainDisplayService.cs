@@ -17,8 +17,8 @@ namespace BlockChain_01.Services
             {
                 Console.WriteLine();
                 Console.WriteLine($"Index: {block.Index}");
-                Console.WriteLine($"PreviousHash: {block.PreviousHash}");
-                Console.WriteLine($"Hash: {block.Hash}");
+                Console.WriteLine($"PreviousHash: {block.PreviousHash:10}");
+                Console.WriteLine($"Hash: {block.Hash:10}");
                 Console.WriteLine($"Difficulty: {block.Difficulty}");
                 Console.WriteLine($"Nonce: {block.Nonce}");
                 Console.WriteLine($"TimeStamp: {block.TimeStamp}");
@@ -44,8 +44,8 @@ namespace BlockChain_01.Services
 
             Console.WriteLine();
             Console.WriteLine($"Index: {block.Index}");
-            Console.WriteLine($"PreviousHash: {block.PreviousHash}");
-            Console.WriteLine($"Hash: {block.Hash}");
+            Console.WriteLine($"PreviousHash: {block.PreviousHash:10}");
+            Console.WriteLine($"Hash: {block.Hash:10}");
             Console.WriteLine($"Difficulty: {block.Difficulty}");
             Console.WriteLine($"Nonce: {block.Nonce}");
             Console.WriteLine($"TimeStamp: {block.TimeStamp}");

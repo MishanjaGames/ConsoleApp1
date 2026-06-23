@@ -22,7 +22,7 @@ namespace BlockChain_01.Services
         }
 
         public Transaction CreateTransaction(Wallet walletFrom, string to, decimal amount, byte[] senderPublicKey) {
-            
+
             var ballance = _walletService.GetBalance(walletFrom.Address);
             if (ballance < amount)
             {
@@ -33,14 +33,16 @@ namespace BlockChain_01.Services
                 }
             }
 
-            var tx = new Transaction(walletFrom.Address, to, amount, senderPublicKey);
+            // For COINBASE transactions, use the wallet name as the From field instead of address
+            string fromField = walletFrom.Name == "COINBASE" ? "COINBASE" : walletFrom.Address;
+            var tx = new Transaction(fromField, to, amount, senderPublicKey);
             tx.Signature = walletFrom.Sign(tx.GetDataToSign());
             var valid = ValidateTransaction(tx);
             if (!valid.IsValid)
             {
                 throw new ArgumentException(valid.ErrorMessage);
             }
-            
+
             return tx;
         }
 
@@ -54,7 +56,7 @@ namespace BlockChain_01.Services
             //if (!AddressPattern.IsMatch(transaction.To)) { return (false, $"Invalid To address: '{transaction.To}' (must be 0x + 40 alphanumeric chars)"); }
             if (transaction.Amount <= 0) { return (false, "Field Amount is null"); }
             if (!_walletService.VerifySignature(transaction.SenderPublicKey, transaction.GetDataToSign(), transaction.Signature)) { return (false, "Invalid Signature"); }
-            
+
             return (true, string.Empty);
         }
     }

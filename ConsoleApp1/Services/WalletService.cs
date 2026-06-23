@@ -42,8 +42,9 @@ namespace BlockChain_01.Services
                 {
                     if (transaction.To == address)
                         balance += transaction.Amount;
-                    if (transaction.From == address)
-                        balance -= transaction.Amount;
+                    if (transaction.From == address) {
+                        balance -= (transaction.Amount+transaction.Fee);
+                    }
                 }
             }
             return balance;
