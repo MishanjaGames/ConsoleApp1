@@ -148,8 +148,8 @@ var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
 var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
 var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
 
-
-void RunEconomyAudit()
+*/
+async Task RunEconomyAudit()
 {
     Console.WriteLine("=== Part 1: Attack Double Spend ===");
     var bc = new BlockChainService();
@@ -160,25 +160,27 @@ void RunEconomyAudit()
     var carloW = ws.CreateWallet("Carlo");
     var minerW = ws.CreateWallet("Miner");
 
-    bc.MineBlock(new List<Transaction>(), aliceW.Address);
+    await bc.MineBlockAsync(aliceW.Address);
     Console.WriteLine($"Balance of Alice: {ws.GetBalance(aliceW.Address)}");
 
     var tx1 = ts.CreateTransaction(aliceW, bobW.Address, 50, aliceW.PublicKey);
     var tx2 = ts.CreateTransaction(aliceW, carloW.Address, 50, aliceW.PublicKey);
     try
     {
-        bc.MineBlock(new List<Transaction> { tx1, tx2 }, minerW.Address);
+        bc.AddTransactionToMempool(tx1);
+        bc.AddTransactionToMempool(tx2);
+        await bc.MineBlockAsync(minerW.Address);
         Console.WriteLine("ERROR: attack had an effect!");
     }
     catch (InvalidOperationException ex)
     {
-        Console.WriteLine($"Attack ended: {ex.Message}");
+        Console.WriteLine($"Attack blocked: {ex.Message}");
     }
 
     Console.WriteLine("\n=== Part 2: Hard Cap (MaxSupply=1000) ===");
     for (int i = 1; i <= 22; i++)
     {
-        bc.MineBlock(new List<Transaction>(), minerW.Address);
+        await bc.MineBlockAsync(minerW.Address);
         if (i is >= 18 and <= 21)
             Console.WriteLine($"Block #{i}: TotalMinted={bc.TotalMinted}, Miners balance={ws.GetBalance(minerW.Address)}");
     }
@@ -187,7 +189,7 @@ void RunEconomyAudit()
     bool ok = bc.ValidateEconomy();
     Console.WriteLine($"ValidateEconomy(): {ok}");
 }
-*/
+
 
 async Task RunMempoolDemo()
 {
@@ -359,6 +361,7 @@ do
     Console.WriteLine("7: Initiate testing");
     Console.WriteLine("8: Vanity Mining Demo");
     Console.WriteLine("9: Smart Chunking + Address Validation Demo");
+    Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -497,24 +500,15 @@ do
             await RunMempoolDemo();
             break;
         case "8":
-            Console.WriteLine("\n=== Vanity Mining Demo (target prefix: \"cafe\") ===");
-            var bcVanity = new BlockChainService();
-            var wsVanity = new WalletService(bcVanity.Chain);
-            var minerVanity = wsVanity.CreateWallet("Miner");
-            Console.WriteLine($"Genesis block hash: {bcVanity.Chain[0].Hash}");
-            for (int i = 0; i < 3; i++)
-            {
-                await bcVanity.MineBlockAsync(minerVanity.Address);
-                var b = bcVanity.Chain.Last();
-                Console.WriteLine($"Block #{b.Index} | Hash: {b.Hash} | Duration: {b.MiningDuration:F2}s");
-            }
-            Console.WriteLine($"\nChain valid: {bcVanity.IsValid()}");
-            Console.WriteLine("All hashes start with \"cafe\": " +
-                bcVanity.Chain.Skip(1).All(b => b.Hash.StartsWith("cafe")));
+            Console.WriteLine("FIX THIS.");
+            //await TestVanityMining();
             break;
         case "9":
             Console.WriteLine("FIX THIS.");
             //RunSmartChunkingDemo();
+            break;
+        case "10":
+            await RunEconomyAudit();
             break;
         default:
             if (choice != "0")

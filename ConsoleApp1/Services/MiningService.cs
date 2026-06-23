@@ -7,7 +7,7 @@ namespace BlockChain_01.Services
     {
         private readonly HashingService _hashingService;
         public string VanityTarget { get; set; } = "QWERTY123";
-        public bool useDifficulty { get; } = false;
+        public bool useDifficulty { get; } = true;
 
         public MiningService(HashingService hashingService)
         {
