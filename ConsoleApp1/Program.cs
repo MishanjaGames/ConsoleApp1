@@ -497,8 +497,20 @@ do
             await RunMempoolDemo();
             break;
         case "8":
-            Console.WriteLine("FIX THIS.");
-            //await TestVanityMining();
+            Console.WriteLine("\n=== Vanity Mining Demo (target prefix: \"cafe\") ===");
+            var bcVanity = new BlockChainService();
+            var wsVanity = new WalletService(bcVanity.Chain);
+            var minerVanity = wsVanity.CreateWallet("Miner");
+            Console.WriteLine($"Genesis block hash: {bcVanity.Chain[0].Hash}");
+            for (int i = 0; i < 3; i++)
+            {
+                await bcVanity.MineBlockAsync(minerVanity.Address);
+                var b = bcVanity.Chain.Last();
+                Console.WriteLine($"Block #{b.Index} | Hash: {b.Hash} | Duration: {b.MiningDuration:F2}s");
+            }
+            Console.WriteLine($"\nChain valid: {bcVanity.IsValid()}");
+            Console.WriteLine("All hashes start with \"cafe\": " +
+                bcVanity.Chain.Skip(1).All(b => b.Hash.StartsWith("cafe")));
             break;
         case "9":
             Console.WriteLine("FIX THIS.");
