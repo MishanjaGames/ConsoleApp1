@@ -21,6 +21,7 @@ namespace BlockChain_01.Services
         private const double _miningDurationTolerance = 2.0;
         private readonly decimal _miningReward = 50m;
         private readonly decimal maxTransactionAmount = 2m;
+        private readonly int howingInterval = 5;
         public BlockChainService(double targetBlockTime = 5)
         {
             Chain = new List<Block>();
@@ -77,7 +78,7 @@ namespace BlockChain_01.Services
             var tempBalances = new Dictionary<string, decimal>();
 
             var sortedTransactions = PendingTransactions.OrderByDescending(tx => tx.Fee).ToList();
-            var totalreward = sortedTransactions.Sum(tx => tx.Fee) + _miningReward;
+            var totalreward = sortedTransactions.Sum(tx => tx.Fee) + GetMinerReward();
 
             foreach (var transaction in PendingTransactions)
             {
@@ -345,6 +346,12 @@ namespace BlockChain_01.Services
             }
 
             PendingTransactions.Add(transaction);
+        }
+
+        private decimal GetMinerReward()
+        {
+            int halvingCount = (Chain.Count - 1) / howingInterval;
+            return _miningReward / (decimal)Math.Pow(2, halvingCount);
         }
     }
 }
