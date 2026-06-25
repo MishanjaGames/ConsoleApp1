@@ -17,8 +17,8 @@ namespace BlockChain_01.Services
             {
                 Console.WriteLine();
                 Console.WriteLine($"Index: {block.Index}");
-                Console.WriteLine($"PreviousHash: {block.PreviousHash:10}");
-                Console.WriteLine($"Hash: {block.Hash:10}");
+                Console.WriteLine($"PreviousHash: {block.PreviousHash:5}");
+                Console.WriteLine($"Hash: {block.Hash:5}");
                 Console.WriteLine($"Difficulty: {block.Difficulty}");
                 Console.WriteLine($"Nonce: {block.Nonce}");
                 Console.WriteLine($"TimeStamp: {block.TimeStamp}");
@@ -38,14 +38,14 @@ namespace BlockChain_01.Services
         public void PrintBlock(Block? block, string? hash = null, int index = -1)
         {
             if (block == null)
-                block = hash == null ? BlockChain.Chain[index] : BlockChain.FindBlockByHash(hash);
+                block = (hash == null) ? BlockChain.Chain[index] : BlockChain.FindBlockByHash(hash);
 
             if (block == null) { Console.WriteLine("Block not found."); return; }
 
             Console.WriteLine();
             Console.WriteLine($"Index: {block.Index}");
-            Console.WriteLine($"PreviousHash: {block.PreviousHash:10}");
-            Console.WriteLine($"Hash: {block.Hash:10}");
+            Console.WriteLine($"PreviousHash: {block.PreviousHash:5}");
+            Console.WriteLine($"Hash: {block.Hash:5}");
             Console.WriteLine($"Difficulty: {block.Difficulty}");
             Console.WriteLine($"Nonce: {block.Nonce}");
             Console.WriteLine($"TimeStamp: {block.TimeStamp}");

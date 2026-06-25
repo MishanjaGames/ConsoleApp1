@@ -22,14 +22,16 @@ namespace BlockChain_01.Models
         public string ToRawString()
         {
             if (Signature == null)
-                return $"[{TimeStamp.ToString("O")}] {Id} | {From:10} -> {To:10} | {Amount} | {Fee} | {Convert.ToHexString(new byte[0])}";
-            return $"[{TimeStamp.ToString("O")}] {Id} | {From:10} -> {To:10} | {Amount} | {Fee} | {Convert.ToHexString(Signature)}";
+                return $"[{TimeStamp.ToString("O")}] {Id} | {From:5} -> {To:5} | {Amount} | {Fee} | {Convert.ToHexString(new byte[0]):5}";
+            return $"[{TimeStamp.ToString("O")}] {Id} | {From:5} -> {To:5} | {Amount} | {Fee} | {Convert.ToHexString(Signature):5}";
         }
 
         public byte[] GetDataToSign()
         {
-            return Encoding.UTF8.GetBytes($"[{TimeStamp.ToString("O")}] {Id:10} | {From:10} -> {To:10} | {Amount} | {Fee}");
+            return Encoding.UTF8.GetBytes($"[{TimeStamp.ToString("O")}] {Id:5} | {From:5} -> {To:5} | {Amount} | {Fee}");
         }
+
+        public Transaction() { }
 
         public Transaction(string from, string to, decimal amount, byte[] senderPublicKey)
         {

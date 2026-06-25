@@ -148,7 +148,7 @@ var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
 var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
 var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
 
-*/
+
 async Task RunEconomyAudit()
 {
     Console.WriteLine("=== Part 1: Attack Double Spend ===");
@@ -328,6 +328,7 @@ async Task RunMempoolDemo()
     Console.WriteLine("=== DEMO COMPLETE ===");
     Console.WriteLine(new string('=', 60) + "\n");
 }
+*/
 
 Console.WriteLine("Blockchain initiated :)");
 
@@ -497,7 +498,7 @@ do
                 display.PrintBlock(null, null, idx - 1);
             break;
         case "7":
-            await RunMempoolDemo();
+            //await RunMempoolDemo();
             break;
         case "8":
             Console.WriteLine("FIX THIS.");
@@ -508,7 +509,7 @@ do
             //RunSmartChunkingDemo();
             break;
         case "10":
-            await RunEconomyAudit();
+            //await RunEconomyAudit();
             break;
         default:
             if (choice != "0")

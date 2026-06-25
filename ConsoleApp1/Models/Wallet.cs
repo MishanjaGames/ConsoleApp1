@@ -13,6 +13,8 @@ namespace BlockChain_01.Models
         public byte[] PublicKey { get; set; }
         private byte[] PrivateKey { get; set; }
 
+        public Wallet () { }
+
         public Wallet(string name, string address, byte[] publicKey, byte[] privateKey)
         {
             Name = name;

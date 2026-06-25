@@ -8,6 +8,7 @@ namespace BlockChain_01.Services
         private readonly HashingService _hashingService;
         private readonly TransactionService _transactionService;
         private readonly WalletService _walletService;
+        private readonly FileStorageService _storageService;
         public List<Block> Chain { get; set; }
         public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
         public int Difficulty { get; private set; }
@@ -22,14 +23,41 @@ namespace BlockChain_01.Services
         private readonly decimal maxTransactionAmount = 2m;
         public BlockChainService(double targetBlockTime = 5)
         {
-            _targetBlockTime = targetBlockTime;
             Chain = new List<Block>();
+            _storageService = new FileStorageService();
+            _targetBlockTime = targetBlockTime;
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
             _transactionService = new TransactionService(this);
             _walletService = new WalletService(Chain);
             Difficulty = 1;
-            CreateGenesisBlock();
+
+
+            var loadedChain = _storageService.LoadBlockchain();
+            if (loadedChain != null && loadedChain.Count > 0)
+            {
+                Chain = loadedChain;
+
+                if (!this.IsValid())
+                {
+                    // Part 3: corrupted file handling
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("⚠️ КРИТИЧНА ПОМИЛКА: Файл блокчейну пошкоджено!");
+                    Console.ResetColor();
+
+                    _storageService.fixBackup();
+
+                    loadedChain = _storageService.useBackup();
+                    Chain = loadedChain;
+                    if (!this.IsValid())
+                    {
+                        Chain = new List<Block>();
+                        CreateGenesisBlock();
+                    }
+                }
+            }
+            else { CreateGenesisBlock(); }
+
         }
 
         private void CreateGenesisBlock()
@@ -37,6 +65,7 @@ namespace BlockChain_01.Services
             var genesisBlock = new Block(0, DateTime.UtcNow, new List<Transaction>(), "0", Difficulty);
             _miningService.MineBlock(genesisBlock, Difficulty);
             Chain.Add(genesisBlock);
+            _storageService.SaveBlockchain(Chain);
         }
 
         public async Task<bool> MineBlockAsync(string miningAddress,
@@ -102,6 +131,7 @@ namespace BlockChain_01.Services
 
             Chain.Add(newBlock);
             PendingTransactions.RemoveAll(tx => sortedTransactions.Contains(tx));
+            _storageService.SaveBlockchain(Chain);
             return true;
         }
 
@@ -188,7 +218,7 @@ namespace BlockChain_01.Services
 
                 if (cur.Hash != _hashingService.ComputeHash(cur)) return false;
                 if (cur.PreviousHash != prev.Hash) return false;
-                if (!cur.Hash.StartsWith(_miningService.VanityTarget)) return false;
+                if (!cur.Hash.StartsWith((_miningService.useDifficulty) ? new string('0', Difficulty) : _miningService.VanityTarget)) return false;
 
                 if (cur.MiningDuration < 0) return false;
 
@@ -196,6 +226,19 @@ namespace BlockChain_01.Services
 
                 double physicalDiff = (cur.TimeStamp - prev.TimeStamp).TotalSeconds;
                 if (cur.MiningDuration > physicalDiff + _miningDurationTolerance) return false;
+
+                // Part 2: verify signatures of all non-coinbase transactions
+                foreach (var tx in cur.Transactions)
+                {
+                    if (tx.From == "COINBASE") continue;
+                    if (!_walletService.VerifySignature(tx.SenderPublicKey, tx.GetDataToSign(), tx.Signature))
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[КРИТИЧНА ЗАГРОЗА]: Виявлено підроблену транзакцію в блоці {cur.Index}!");
+                        Console.ResetColor();
+                        return false;
+                    }
+                }
             }
             return true;
         }
