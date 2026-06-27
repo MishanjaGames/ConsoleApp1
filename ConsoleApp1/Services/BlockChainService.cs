@@ -9,6 +9,7 @@ namespace BlockChain_01.Services
         private readonly TransactionService _transactionService;
         private readonly WalletService _walletService;
         private readonly FileStorageService _storageService;
+        private readonly TCPP2PService _p2pService;
         public List<Block> Chain { get; set; }
         public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
         public int Difficulty { get; private set; }
@@ -63,13 +64,13 @@ namespace BlockChain_01.Services
 
         private void CreateGenesisBlock()
         {
-            var genesisBlock = new Block(0, DateTime.UtcNow, new List<Transaction>(), "0", Difficulty);
+            var genesisBlock = new Block(0, DateTime.Parse("01.01.1990"), new List<Transaction>(), "0", Difficulty);
             _miningService.MineBlock(genesisBlock, Difficulty);
             Chain.Add(genesisBlock);
             _storageService.SaveBlockchain(Chain);
         }
 
-        public async Task<bool> MineBlockAsync(string miningAddress,
+        public async Task<Block> MineBlockAsync(string miningAddress,
             CancellationToken cancellationToken = default)
         {
             //var (included, weight) = FitToByteLimit(transactions);
@@ -78,7 +79,9 @@ namespace BlockChain_01.Services
             var tempBalances = new Dictionary<string, decimal>();
 
             var sortedTransactions = PendingTransactions.OrderByDescending(tx => tx.Fee).ToList();
-            var totalreward = sortedTransactions.Sum(tx => tx.Fee) + GetMinerReward();
+            var totalFees = sortedTransactions.Sum(tx => tx.Fee);
+            var minerSubsidy = GetMinerReward();
+            var totalreward = totalFees + minerSubsidy;
 
             foreach (var transaction in PendingTransactions)
             {
@@ -106,18 +109,17 @@ namespace BlockChain_01.Services
 
             AdjustDifficulty();
 
-            var lastBlock = Chain.Last();
-            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, sortedTransactions, lastBlock.Hash, Difficulty);
-
-            Console.WriteLine($"\n[Blockchain] Adding block ...");
-
             decimal remainingSupply = MaxSupply - TotalMinted;
-            decimal rewardAmount = remainingSupply >= _miningReward ? _miningReward : Math.Max(0, remainingSupply);
+            decimal rewardAmount = remainingSupply >= minerSubsidy ? minerSubsidy : Math.Max(0, remainingSupply);
 
+            // Prepare included transactions for this block: sorted txs + coinbase reward (if any)
+            var includedTransactions = sortedTransactions.ToList();
+            Transaction rewardTx = null;
             if (rewardAmount > 0)
             {
-                var reward = new Transaction("COINBASE", miningAddress, totalreward, new byte[0]);
-                PendingTransactions.Add(reward);
+                rewardTx = new Transaction("COINBASE", miningAddress, totalreward, new byte[0]);
+                // coinbase transaction is included in the block but not added to the mempool
+                includedTransactions.Insert(0, rewardTx);
                 TotalMinted += rewardAmount;
             }
             else
@@ -125,15 +127,21 @@ namespace BlockChain_01.Services
                 Console.WriteLine("[Blockchain] MaxSupply reached — mining without reward.");
             }
 
+            var lastBlock = Chain.Last();
+            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, includedTransactions, lastBlock.Hash, Difficulty);
+
+            Console.WriteLine($"\n[Blockchain] Adding block ...");
+
             var result = await _miningService.MineBlockAsync(newBlock, Difficulty, cancellationToken);
 
             if (result == null)
-                return false;
+                return null;
 
             Chain.Add(newBlock);
+            // Remove only transactions that were present in mempool (rewardTx was never added to mempool)
             PendingTransactions.RemoveAll(tx => sortedTransactions.Contains(tx));
             _storageService.SaveBlockchain(Chain);
-            return true;
+            return newBlock;
         }
 
         public void MineBlock(string miningAddress)

@@ -2,6 +2,14 @@
 using BlockChain_01.Services;
 using System.Text;
 
+
+Console.WriteLine("Awaiting port:");
+var port = int.Parse(Console.ReadLine() ?? "5000");
+Console.WriteLine("Input username");
+var name = Console.ReadLine();
+
+
+
 var blockchain = new BlockChainService();
 var display = new BlockChainDisplayService(blockchain);
 var walletService = new WalletService(blockchain.Chain);
@@ -10,6 +18,249 @@ var transactionService = new TransactionService(blockchain);
 
 var users = new List<Wallet>();
 var walletRegistry = new Dictionary<string, Wallet>();
+
+
+Console.WriteLine("Blockchain initiated :)");
+
+Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
+Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
+
+var w_Mark = walletService.CreateWallet("Mark");
+var w_Alice = walletService.CreateWallet("Alice");
+var device = walletService.CreateWallet(name);
+users.Add(w_Mark);
+users.Add(w_Alice);
+users.Add(device);
+walletRegistry["Mark"] = w_Mark;
+walletRegistry["Alice"] = w_Alice;
+walletRegistry[systemWallet.Name] = systemWallet;
+walletRegistry[device.Name] = device;
+
+var p2pService = new TCPP2PService(blockchain, port);
+p2pService.Start();
+
+Console.WriteLine($"Input port and address to connect");
+var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
+if (portToConnect!=null)
+{
+    Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
+    await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
+}
+
+string? choice;
+
+do
+{
+    Console.WriteLine(new string('=', 50));
+    Console.WriteLine($"|| {device.Name}:{blockchain.GetPendingBalance(device.Address)} ||");
+    Console.WriteLine(new string('=', 50));
+    Console.WriteLine("1: Display Blockchain");
+    Console.WriteLine("2: Add Block");
+    Console.WriteLine("3: Add Transaction");
+    Console.WriteLine("4: View Banace");
+    Console.WriteLine("5: Validate BlockChain");
+    Console.WriteLine("6: Get Block by Index");
+    Console.WriteLine("7: Initiate testing");
+    Console.WriteLine("8: Vanity Mining Demo");
+    Console.WriteLine("9: Smart Chunking + Address Validation Demo");
+    Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
+    Console.WriteLine("0: Exit");
+    Console.WriteLine(new string('-', 50));
+    choice = Console.ReadLine();
+    Console.WriteLine(new string('=', 50));
+
+    switch (choice)
+    {
+        case "1":
+            display.PrintBlockChain(blockchain.Chain);
+            break;
+
+        case "2":
+            //var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
+            //var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
+            //if (trans == null || trans1 == null)
+            //{
+            //    Console.WriteLine("Transaction creation failed. Check balances and try again.");
+            //    break;
+            //}
+            Console.Write("Enter (1) for multithreaded (2) for generating in net: ");
+            string select = Console.ReadLine() ?? "";
+            if (select == "1")
+            {
+                Console.Write("How many coins to generate: ");
+                if (!int.TryParse(Console.ReadLine(), out int c)) break;
+
+                for (int i = 0; i < c; i++)
+                {
+                    p2pService.BroadcastNewBlock(await blockchain.MineBlockAsync(device.Address));
+                }
+            }
+            else if (select == "2")
+            {
+                Console.Write("How many coins to generate: ");
+                if (!int.TryParse(Console.ReadLine(), out int count)) break;
+
+                for (int i = 0; i < count; i++)
+                {
+                    using var cts = new CancellationTokenSource();
+
+                    var networkSimTask = Task.Run(async () =>
+                    {
+                        int delay = Random.Shared.Next(2000, 8000);
+                        Console.WriteLine($"[Network] Other node is generating block. Awaiting answer in ~{delay / 1000}s");
+                        await Task.Delay(delay);
+                        if (!cts.Token.IsCancellationRequested)
+                        {
+                            Console.WriteLine("\n[Network] Block already generated. Canceling...");
+                            cts.Cancel();
+                        }
+                    });
+
+                    var mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
+
+                    if (mined!=null)
+                    {
+                        Console.WriteLine("[Network] Block generated. Adding it.");
+                        p2pService.BroadcastNewBlock(mined);
+                        cts.Cancel();
+                    }
+
+                    try { await networkSimTask; } catch { }
+                }
+            }
+            else
+            {
+                Console.WriteLine("Wrong input");
+            }
+            break;
+
+        case "3":
+            Console.Write("From (wallet name): ");
+            string from = Console.ReadLine() ?? "";
+            Console.Write("To (wallet name or address): ");
+            string to = Console.ReadLine() ?? "";
+            Console.Write("Amount: ");
+            if (!decimal.TryParse(Console.ReadLine(), out decimal amount)) break;
+
+            if (!walletRegistry.ContainsKey(from))
+            {
+                Console.WriteLine($"Wallet '{from}' not found. Available wallets: {string.Join(", ", walletRegistry.Keys)}");
+                break;
+            }
+
+            var walletFrom = walletRegistry[from];
+
+            // Convert wallet name to address if needed
+            string toAddress = to;
+            if (walletRegistry.ContainsKey(to))
+            {
+                toAddress = walletRegistry[to].Address;
+            }
+
+            try
+            {
+                var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
+                if (transaction == null)
+                {
+                    Console.WriteLine("Transaction creation failed.");
+                    break;
+                }
+
+                // Add transaction to mempool
+                blockchain.AddTransactionToMempool(transaction);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+            break;
+
+        case "4":
+            Console.WriteLine("\n=== Wallet Balances ===");
+            foreach (var kvp in walletRegistry)
+            {
+                decimal balance = walletService.GetBalance(kvp.Value.Address);
+                Console.WriteLine($"{kvp.Key}: {balance}");
+            }
+            break;
+
+        case "5":
+            if (blockchain.IsValid())
+                Console.WriteLine("All Blockchain is valid");
+            else
+            {
+                Console.WriteLine("Integrity compromised!");
+                display.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
+            }
+            break;
+
+        case "6":
+            Console.Write("Block Index: ");
+            if (int.TryParse(Console.ReadLine(), out int idx))
+                display.PrintBlock(null, null, idx - 1);
+            break;
+        case "7":
+            //await RunMempoolDemo();
+            break;
+        case "8":
+            Console.WriteLine("FIX THIS.");
+            //await TestVanityMining();
+            break;
+        case "9":
+            Console.WriteLine("FIX THIS.");
+            //RunSmartChunkingDemo();
+            break;
+        case "10":
+            //await RunEconomyAudit();
+            break;
+        default:
+            if (choice != "0")
+                Console.WriteLine("Incorrect. Try again.");
+            break;
+    }
+}
+while (choice != "0");
+
+//Console.WriteLine(new string('=', 20));
+//blockchain.Chain[1].Data = "Bob -> ???: 99999999999";
+//displayblockchain.PrintValidationResult(blockchain.IsValid());
+//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
+
+
+//Console.WriteLine(new string('=', 20));
+//blockchain.Chain[2].Author = "John";
+//displayblockchain.PrintValidationResult(blockchain.IsValid());
+//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
+
+
+//Console.WriteLine(new string('=', 20));
+//displayblockchain.PrintBlock(blockchain.FindBlockByHash(blockchain.Chain[1].Hash));
+
+
+//Console.WriteLine(new string('=', 20));
+
+//var hashingService = new HashingService();
+
+//string str1 = "Hello";
+//string str2 = "hello";
+
+//string hash1 = hashingService.ComputeHash_P(str1);
+//string hash2 = hashingService.ComputeHash_P(str2);
+
+//Console.WriteLine($"Hash 1: \"{str1}\" => {hash1}");
+//Console.WriteLine($"Hash 2: \"{str2}\" => {hash2}");
+
+//int diffCount = 0;
+//for (int i = 0; i < hash1.Length; i++)
+//{
+//    if (hash1[i] != hash2[i])
+//        diffCount++;
+//}
+
+//double changePercent = (double)diffCount / hash1.Length * 100;
+
+//Console.WriteLine($"Different chars: {diffCount} / {hash1.Length}");
+//Console.WriteLine($"Hash change: {changePercent}%");
 
 /*
 static void PrintResult(string testName, bool passed)
@@ -329,233 +580,3 @@ async Task RunMempoolDemo()
     Console.WriteLine(new string('=', 60) + "\n");
 }
 */
-
-Console.WriteLine("Blockchain initiated :)");
-
-Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
-Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
-
-var w_Mark = walletService.CreateWallet("Mark");
-var w_Alice = walletService.CreateWallet("Alice");
-var device = walletService.CreateWallet("User");
-users.Add(w_Mark);
-users.Add(w_Alice);
-users.Add(device);
-walletRegistry["Mark"] = w_Mark;
-walletRegistry["Alice"] = w_Alice;
-walletRegistry[systemWallet.Name] = systemWallet;
-walletRegistry[device.Name] = device;
-
-string? choice;
-
-do
-{
-    Console.WriteLine(new string('=', 50));
-    Console.WriteLine($"|| {device.Name}:{walletService.GetBalance(device.Address)} ||");
-    Console.WriteLine(new string('=', 50));
-    Console.WriteLine("1: Display Blockchain");
-    Console.WriteLine("2: Add Block");
-    Console.WriteLine("3: Add Transaction");
-    Console.WriteLine("4: View Banace");
-    Console.WriteLine("5: Validate BlockChain");
-    Console.WriteLine("6: Get Block by Index");
-    Console.WriteLine("7: Initiate testing");
-    Console.WriteLine("8: Vanity Mining Demo");
-    Console.WriteLine("9: Smart Chunking + Address Validation Demo");
-    Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
-    Console.WriteLine("0: Exit");
-    Console.WriteLine(new string('-', 50));
-    choice = Console.ReadLine();
-    Console.WriteLine(new string('=', 50));
-
-    switch (choice)
-    {
-        case "1":
-            display.PrintBlockChain(blockchain.Chain);
-            break;
-
-        case "2":
-            //var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
-            //var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
-            //if (trans == null || trans1 == null)
-            //{
-            //    Console.WriteLine("Transaction creation failed. Check balances and try again.");
-            //    break;
-            //}
-            Console.Write("Enter (1) for multithreaded (2) for generating in net: ");
-            string select = Console.ReadLine() ?? "";
-            if (select == "1")
-            {
-                Console.Write("How many coins to generate: ");
-                if (!int.TryParse(Console.ReadLine(), out int c)) break;
-
-                for (int i = 0; i < c; i++)
-                {
-                    await blockchain.MineBlockAsync(device.Address);
-                }
-            }
-            else if (select == "2")
-            {
-                Console.Write("How many coins to generate: ");
-                if (!int.TryParse(Console.ReadLine(), out int count)) break;
-
-                for (int i = 0; i < count; i++)
-                {
-                    using var cts = new CancellationTokenSource();
-
-                    var networkSimTask = Task.Run(async () =>
-                    {
-                        int delay = Random.Shared.Next(2000, 8000);
-                        Console.WriteLine($"[Network] Other node is generating block. Awaiting answer in ~{delay / 1000}s");
-                        await Task.Delay(delay);
-                        if (!cts.Token.IsCancellationRequested)
-                        {
-                            Console.WriteLine("\n[Network] Block already generated. Canceling...");
-                            cts.Cancel();
-                        }
-                    });
-
-                    bool mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
-
-                    if (mined)
-                    {
-                        Console.WriteLine("[Network] Block generated. Adding it.");
-                        cts.Cancel();
-                    }
-
-                    try { await networkSimTask; } catch { }
-                }
-            }
-            else
-            {
-                Console.WriteLine("Wrong input");
-            }
-            break;
-
-        case "3":
-            Console.Write("From (wallet name): ");
-            string from = Console.ReadLine() ?? "";
-            Console.Write("To (wallet name or address): ");
-            string to = Console.ReadLine() ?? "";
-            Console.Write("Amount: ");
-            if (!decimal.TryParse(Console.ReadLine(), out decimal amount)) break;
-
-            if (!walletRegistry.ContainsKey(from))
-            {
-                Console.WriteLine($"Wallet '{from}' not found. Available wallets: {string.Join(", ", walletRegistry.Keys)}");
-                break;
-            }
-
-            var walletFrom = walletRegistry[from];
-
-            // Convert wallet name to address if needed
-            string toAddress = to;
-            if (walletRegistry.ContainsKey(to))
-            {
-                toAddress = walletRegistry[to].Address;
-            }
-
-            try
-            {
-                var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
-                if (transaction == null)
-                {
-                    Console.WriteLine("Transaction creation failed.");
-                    break;
-                }
-
-                // Add transaction to mempool
-                blockchain.AddTransactionToMempool(transaction);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-            }
-            break;
-
-        case "4":
-            Console.WriteLine("\n=== Wallet Balances ===");
-            foreach (var kvp in walletRegistry)
-            {
-                decimal balance = walletService.GetBalance(kvp.Value.Address);
-                Console.WriteLine($"{kvp.Key}: {balance}");
-            }
-            break;
-
-        case "5":
-            if (blockchain.IsValid())
-                Console.WriteLine("All Blockchain is valid");
-            else
-            {
-                Console.WriteLine("Integrity compromised!");
-                display.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
-            }
-            break;
-
-        case "6":
-            Console.Write("Block Index: ");
-            if (int.TryParse(Console.ReadLine(), out int idx))
-                display.PrintBlock(null, null, idx - 1);
-            break;
-        case "7":
-            //await RunMempoolDemo();
-            break;
-        case "8":
-            Console.WriteLine("FIX THIS.");
-            //await TestVanityMining();
-            break;
-        case "9":
-            Console.WriteLine("FIX THIS.");
-            //RunSmartChunkingDemo();
-            break;
-        case "10":
-            //await RunEconomyAudit();
-            break;
-        default:
-            if (choice != "0")
-                Console.WriteLine("Incorrect. Try again.");
-            break;
-    }
-}
-while (choice != "0");
-
-//Console.WriteLine(new string('=', 20));
-//blockchain.Chain[1].Data = "Bob -> ???: 99999999999";
-//displayblockchain.PrintValidationResult(blockchain.IsValid());
-//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
-
-
-//Console.WriteLine(new string('=', 20));
-//blockchain.Chain[2].Author = "John";
-//displayblockchain.PrintValidationResult(blockchain.IsValid());
-//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
-
-
-//Console.WriteLine(new string('=', 20));
-//displayblockchain.PrintBlock(blockchain.FindBlockByHash(blockchain.Chain[1].Hash));
-
-
-//Console.WriteLine(new string('=', 20));
-
-//var hashingService = new HashingService();
-
-//string str1 = "Hello";
-//string str2 = "hello";
-
-//string hash1 = hashingService.ComputeHash_P(str1);
-//string hash2 = hashingService.ComputeHash_P(str2);
-
-//Console.WriteLine($"Hash 1: \"{str1}\" => {hash1}");
-//Console.WriteLine($"Hash 2: \"{str2}\" => {hash2}");
-
-//int diffCount = 0;
-//for (int i = 0; i < hash1.Length; i++)
-//{
-//    if (hash1[i] != hash2[i])
-//        diffCount++;
-//}
-
-//double changePercent = (double)diffCount / hash1.Length * 100;
-
-//Console.WriteLine($"Different chars: {diffCount} / {hash1.Length}");
-//Console.WriteLine($"Hash change: {changePercent}%");

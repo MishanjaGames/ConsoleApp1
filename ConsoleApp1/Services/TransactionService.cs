@@ -13,7 +13,7 @@ namespace BlockChain_01.Services
     {
         private readonly WalletService _walletService;
         private readonly BlockChainService _blockchain;
-        private static readonly Regex AddressPattern = new Regex(@"^0x[a-zA-Z0-9]{40}$", RegexOptions.Compiled);
+        //private static readonly Regex AddressPattern = new Regex(@"^0x[a-zA-Z0-9]{40}$", RegexOptions.Compiled);
 
         public TransactionService(BlockChainService blockchain)
         {
@@ -54,8 +54,8 @@ namespace BlockChain_01.Services
             if (string.IsNullOrEmpty(transaction.To)) { return (false, "Field To is null"); }
             if (transaction.From == "COINBASE") { return (true, string.Empty); }
             if (string.IsNullOrEmpty(transaction.From)) { return (false, "Field From is null"); }
-            if (!AddressPattern.IsMatch(transaction.From)) { return (false, $"Invalid From address: '{transaction.From}' (must be 0x + 40 alphanumeric chars)"); }
-            if (!AddressPattern.IsMatch(transaction.To)) { return (false, $"Invalid To address: '{transaction.To}' (must be 0x + 40 alphanumeric chars)"); }
+            //if (!AddressPattern.IsMatch(transaction.From)) { return (false, $"Invalid From address: '{transaction.From}' (must be 0x + 40 alphanumeric chars)"); }
+            //if (!AddressPattern.IsMatch(transaction.To)) { return (false, $"Invalid To address: '{transaction.To}' (must be 0x + 40 alphanumeric chars)"); }
             if (transaction.Amount <= 0) { return (false, "Field Amount is null"); }
             if (!_walletService.VerifySignature(transaction.SenderPublicKey, transaction.GetDataToSign(), transaction.Signature)) { return (false, "Invalid Signature"); }
 
