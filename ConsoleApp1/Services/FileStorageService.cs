@@ -1,116 +1,80 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
 using BlockChain_01.Models;
+using BlockChain_01.Services;
 
 namespace BlockChain_01.Services
 {
     public class FileStorageService
     {
-        private readonly string _blockchainFilePath = "blockchain_data.json";
-        private readonly string _walletsFilePath = "wallets_data.json";
+        private const string ChainFile = "blockchain_data.json";
+        private const string WalletsFile = "wallets_data.json";
+        private const string PeerWalletsFile = "peer_wallets.json";
+        private const string BackupFile = "blockchain_backup.json";
+        private const string CorruptedFile = "blockchain_corrupted.json";
 
-        private readonly JsonSerializerOptions jsonSerializerOptions = new JsonSerializerOptions()
+        private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+        // ── Blockchain ───────────────────────────────────────────────
+
+        public void SaveBlockchain(List<Block> chain)
         {
-            WriteIndented = true
-        };
-
-        private readonly string _backupFilePath = "blockchain_backup.json";
-        private readonly string _corruptedFilePath = "blockchain_corrupted.json";
-
-        public void SaveBlockchain(List<Block> blockchain)
-        {
-            Console.WriteLine($"Saving blockchain.");
-            // Part 4: backup current file before overwriting
-            if (File.Exists(_blockchainFilePath))
-                File.Copy(_blockchainFilePath, _backupFilePath, overwrite: true);
-
-            var json = JsonSerializer.Serialize(blockchain, jsonSerializerOptions);
-            File.WriteAllText(_blockchainFilePath, json);
-            Console.WriteLine($"Updates Saved");
-        }
-
-        public void fixBackup() {
-            File.Move(_blockchainFilePath, _corruptedFilePath, overwrite: true);
-        }
-
-        public List<Block>? useBackup()
-        {
-            // Part 4: try backup
-            Console.WriteLine("🔄 Спроба відновлення бази даних з резервної копії...");
-            if (File.Exists(_backupFilePath))
-            {
-                var backupJson = File.ReadAllText(_backupFilePath);
-                var list = JsonSerializer.Deserialize<List<Block>>(backupJson);
-                if (list == null) { return null; }
-                if (list != null && list.Count > 0)
-                {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("✅ Блокчейн успішно відновлено з резервної копії!");
-                    Console.ResetColor();
-                    return list;
-                }
-                else
-                {
-                    return null;
-                }
-            }
-
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("❌ Резервна копія відсутня.");
-            Console.WriteLine("Очікуємо блокчейн від інших користувачів");
-            Console.WriteLine("Користувачів не знайдено");
-            Console.WriteLine("Створення нового блокчейну");
-            Console.ResetColor();
-            return null;
+            if (File.Exists(ChainFile))
+                File.Copy(ChainFile, BackupFile, overwrite: true);
+            File.WriteAllText(ChainFile, JsonSerializer.Serialize(chain, JsonOptions));
+            Console.WriteLine("[Storage] Blockchain saved.");
         }
 
         public List<Block>? LoadBlockchain()
         {
-            Console.WriteLine($"Reading blockchain.");
-
-            if (!File.Exists(_blockchainFilePath)) {
-                var backupList = useBackup();
-                return backupList;
-            }
-            var json = File.ReadAllText(_blockchainFilePath);
-            var list = JsonSerializer.Deserialize<List<Block>>(json);
-            if (list == null) {
-                var backupList = useBackup();
-                return backupList;
-            }
-            if (list != null && list.Count > 0)
-            {
-                Console.WriteLine($"Blockchain loaded successfully.");
-                Console.WriteLine($"Applying updated");
-                return list;
-            }
-            else
-            {
-                var backupList = useBackup();
-                return backupList;
-            }
+            Console.WriteLine("[Storage] Loading blockchain...");
+            return TryLoad<List<Block>>(ChainFile) ?? TryLoadBackup();
         }
 
-        public void SaveWallets(List<Wallet> wallets)
+        public void ArchiveCorrupted() =>
+            File.Move(ChainFile, CorruptedFile, overwrite: true);
+
+        public List<Block>? TryLoadBackup()
         {
-            Console.WriteLine($"Saving Wallets");
-            var json = JsonSerializer.Serialize(wallets, jsonSerializerOptions);
-            File.WriteAllText(_walletsFilePath, json);
-            Console.WriteLine($"Updates Saved");
+            Console.WriteLine("[Storage] Trying backup...");
+            if (!File.Exists(BackupFile)) { Warn("No backup found. Starting fresh."); return null; }
+            var result = TryLoad<List<Block>>(BackupFile);
+            if (result != null) Console.WriteLine("[Storage] Restored from backup.");
+            return result;
         }
 
-        public List<Wallet> LoadWallets()
+        // ── Local wallets (encrypted private keys) ───────────────────
+
+        public void SaveWallets(IEnumerable<Wallet> wallets)
         {
-            Console.WriteLine($"Reading Wallets");
-            if (!File.Exists(_walletsFilePath))
-                return new List<Wallet>();
-            var json = File.ReadAllText(_walletsFilePath);
-            Console.WriteLine($"Applying updated");
-            return JsonSerializer.Deserialize<List<Wallet>>(json) ?? new List<Wallet>();
+            File.WriteAllText(WalletsFile, JsonSerializer.Serialize(wallets.ToList(), JsonOptions));
+            Console.WriteLine("[Storage] Wallets saved.");
+        }
+
+        public List<Wallet> LoadWallets() =>
+            TryLoad<List<Wallet>>(WalletsFile) ?? new List<Wallet>();
+
+        // ── Peer wallet registry ─────────────────────────────────────
+
+        public void SavePeerWallets(List<PeerWalletInfo> wallets) =>
+            File.WriteAllText(PeerWalletsFile, JsonSerializer.Serialize(wallets, JsonOptions));
+
+        public List<PeerWalletInfo> LoadPeerWallets() =>
+            TryLoad<List<PeerWalletInfo>>(PeerWalletsFile) ?? new List<PeerWalletInfo>();
+
+        // ── Helpers ──────────────────────────────────────────────────
+
+        private static T? TryLoad<T>(string path) where T : class
+        {
+            if (!File.Exists(path)) return null;
+            try { return JsonSerializer.Deserialize<T>(File.ReadAllText(path)); }
+            catch { return null; }
+        }
+
+        private static void Warn(string msg)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[Storage] {msg}");
+            Console.ResetColor();
         }
     }
 }

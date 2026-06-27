@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text;
 using BlockChain_01.Services;
 
 namespace BlockChain_01.Models
@@ -19,18 +14,6 @@ namespace BlockChain_01.Models
         public byte[] Signature { get; set; }
         public decimal Fee { get; set; }
 
-        public string ToRawString()
-        {
-            if (Signature == null)
-                return $"[{TimeStamp.ToString("O")}] {Id} | {From:5} -> {To:5} | {Amount} | {Fee} | {Convert.ToHexString(new byte[0]):5}";
-            return $"[{TimeStamp.ToString("O")}] {Id} | {From:5} -> {To:5} | {Amount} | {Fee} | {Convert.ToHexString(Signature):5}";
-        }
-
-        public byte[] GetDataToSign()
-        {
-            return Encoding.UTF8.GetBytes($"[{TimeStamp.ToString("O")}] {Id:5} | {From:5} -> {To:5} | {Amount} | {Fee}");
-        }
-
         public Transaction() { }
 
         public Transaction(string from, string to, decimal amount, byte[] senderPublicKey)
@@ -38,9 +21,18 @@ namespace BlockChain_01.Models
             From = from;
             To = to;
             Amount = amount;
+            SenderPublicKey = senderPublicKey;
             TimeStamp = DateTime.UtcNow;
             Id = new HashingService().ComputeHash_P($"{From}>|>{To}|{Amount}|{Fee}");
-            SenderPublicKey = senderPublicKey;
+        }
+
+        public byte[] GetDataToSign() =>
+            Encoding.UTF8.GetBytes($"[{TimeStamp:O}] {Id} | {From} -> {To} | {Amount} | {Fee}");
+
+        public string ToRawString()
+        {
+            string sig = Signature != null ? Convert.ToHexString(Signature) : Convert.ToHexString(Array.Empty<byte>());
+            return $"[{TimeStamp:O}] {Id} | {From} -> {To} | {Amount} | {Fee} | {sig}";
         }
     }
 }

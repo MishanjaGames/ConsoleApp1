@@ -11,27 +11,24 @@
         public double MiningDuration { get; set; }
         public int Difficulty { get; set; }
 
-        public Block () { }
+        public Block() { }
 
         public Block(int index, DateTime timeStamp, List<Transaction> transactions, string previousHash, int difficulty)
         {
             Index = index;
             TimeStamp = timeStamp;
             Transactions = transactions;
-            Nonce = 0;
             PreviousHash = previousHash;
+            Difficulty = difficulty;
+            Nonce = 0;
             Hash = string.Empty;
             MiningDuration = 0;
-            Difficulty = difficulty;
         }
 
-        public Block Clone(int difficulty)
+        public Block Clone(int difficulty) => new Block(Index, TimeStamp, Transactions, PreviousHash, difficulty)
         {
-            return new Block(Index, TimeStamp, Transactions, PreviousHash, difficulty)
-            {
-                Nonce = this.Nonce,
-                Hash = this.Hash
-            };
-        }
+            Nonce = Nonce,
+            Hash = Hash
+        };
     }
 }

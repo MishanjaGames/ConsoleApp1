@@ -4,67 +4,52 @@ namespace BlockChain_01.Services
 {
     public class BlockChainDisplayService
     {
-        private BlockChainService BlockChain { get; set; }
+        private readonly BlockChainService _blockchain;
 
-        public BlockChainDisplayService(BlockChainService blockChain)
-        {
-            BlockChain = blockChain;
-        }
+        public BlockChainDisplayService(BlockChainService blockchain) => _blockchain = blockchain;
 
-        public void PrintBlockChain(List<Block> chain)
+        public void PrintChain(List<Block> chain)
         {
             foreach (var block in chain)
-            {
-                Console.WriteLine();
-                Console.WriteLine($"Index: {block.Index}");
-                Console.WriteLine($"PreviousHash: {block.PreviousHash:5}");
-                Console.WriteLine($"Hash: {block.Hash:5}");
-                Console.WriteLine($"Difficulty: {block.Difficulty}");
-                Console.WriteLine($"Nonce: {block.Nonce}");
-                Console.WriteLine($"TimeStamp: {block.TimeStamp}");
-                Console.WriteLine($"Generating Time: {block.MiningDuration}");
-                Console.WriteLine($"Data: ");
-                if (block.Transactions.Count == 0) { Console.WriteLine("[BlockChain Initiation - Genesis Block]"); }
-                else { 
-                    foreach (var transaction in block.Transactions)
-                    {
-                        Console.WriteLine(transaction.ToRawString());
-                    }
-                }
-                Console.WriteLine(new string('-', 50));
-            }
+                PrintBlock(block);
         }
 
-        public void PrintBlock(Block? block, string? hash = null, int index = -1)
+        public void PrintBlock(Block? block = null, string? hash = null, int index = -1)
         {
-            if (block == null)
-                block = (hash == null) ? BlockChain.Chain[index] : BlockChain.FindBlockByHash(hash);
+            block ??= hash != null ? _blockchain.FindBlockByHash(hash) : _blockchain.Chain.ElementAtOrDefault(index);
 
             if (block == null) { Console.WriteLine("Block not found."); return; }
 
             Console.WriteLine();
-            Console.WriteLine($"Index: {block.Index}");
-            Console.WriteLine($"PreviousHash: {block.PreviousHash:5}");
-            Console.WriteLine($"Hash: {block.Hash:5}");
-            Console.WriteLine($"Difficulty: {block.Difficulty}");
-            Console.WriteLine($"Nonce: {block.Nonce}");
-            Console.WriteLine($"TimeStamp: {block.TimeStamp}");
-            Console.WriteLine($"Generating Time: {block.MiningDuration}");
-            Console.WriteLine($"Data: ");
-            if (block.Transactions.Count == 0) { Console.WriteLine("[BlockChain Initiation - Genesis Block]"); }
+            Console.WriteLine($"  Index:    {block.Index}");
+            Console.WriteLine($"  PrevHash: {block.PreviousHash}");
+            Console.WriteLine($"  Hash:     {block.Hash}");
+            Console.WriteLine($"  Difficulty: {block.Difficulty}  Nonce: {block.Nonce}");
+            Console.WriteLine($"  Time:     {block.TimeStamp}  ({block.MiningDuration:F2}s to mine)");
+            Console.WriteLine($"  Tx count: {block.Transactions.Count}");
+
+            if (block.Transactions.Count == 0)
+                Console.WriteLine("  [Genesis Block]");
             else
-            {
-                foreach (var transaction in block.Transactions)
-                {
-                    Console.WriteLine(transaction.ToRawString());
-                }
-            }
-            Console.WriteLine(new string('-', 50));
+                foreach (var tx in block.Transactions)
+                    Console.WriteLine($"  {tx.ToRawString()}");
+
+            Console.WriteLine(new string('─', 60));
         }
 
-        public void PrintValidationResult(bool isValid)
+        public void PrintValidation(bool isValid)
         {
-            Console.WriteLine(isValid ? "The BlockChain is valid." : "The Blockchain isn't valid.");
+            if (isValid)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("✓ Blockchain is valid.");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("✗ Blockchain integrity compromised!");
+            }
+            Console.ResetColor();
         }
     }
 }

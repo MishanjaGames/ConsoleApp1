@@ -1,582 +1,633 @@
 ﻿using BlockChain_01.Models;
 using BlockChain_01.Services;
-using System.Text;
 
+// ── Startup ───────────────────────────────────────────────────────────────────
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.CursorVisible = false;
+Banner();
 
-Console.WriteLine("Awaiting port:");
-var port = int.Parse(Console.ReadLine() ?? "5000");
-Console.WriteLine("Input username");
-var name = Console.ReadLine();
+// ── Services (needed before login) ───────────────────────────────────────────
+var storage = new FileStorageService();
+var logger = new LoggingService("debug.log");
 
+// ── Login / Register ──────────────────────────────────────────────────────────
+var savedWallets = storage.LoadWallets();
+Wallet device = LoginScreen(savedWallets);
 
-
-var blockchain = new BlockChainService();
-var display = new BlockChainDisplayService(blockchain);
+// ── Blockchain + P2P ──────────────────────────────────────────────────────────
+var blockchain = new BlockChainService(logger);
 var walletService = new WalletService(blockchain.Chain);
-var systemWallet = new WalletService(blockchain.Chain).CreateWallet("COINBASE");
-var transactionService = new TransactionService(blockchain);
+var txService = new TransactionService(blockchain);
 
-var users = new List<Wallet>();
-var walletRegistry = new Dictionary<string, Wallet>();
+const int BASE_PORT = 5000;
+var p2p = new TCPP2PService(blockchain, BASE_PORT, storage, logger);
+p2p.Start();
 
-
-Console.WriteLine("Blockchain initiated :)");
-
-Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
-Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
-
-var w_Mark = walletService.CreateWallet("Mark");
-var w_Alice = walletService.CreateWallet("Alice");
-var device = walletService.CreateWallet(name);
-users.Add(w_Mark);
-users.Add(w_Alice);
-users.Add(device);
-walletRegistry["Mark"] = w_Mark;
-walletRegistry["Alice"] = w_Alice;
-walletRegistry[systemWallet.Name] = systemWallet;
-walletRegistry[device.Name] = device;
-
-var p2pService = new TCPP2PService(blockchain, port);
-p2pService.Start();
-
-Console.WriteLine($"Input port and address to connect");
-var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
-if (portToConnect!=null)
+// Register this wallet with the network
+p2p.RegisterWallet(new PeerWalletInfo
 {
-    Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
-    await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
+    Name = device.Name,
+    Address = device.Address,
+    PublicKey = device.PublicKey
+});
+
+// Auto-connect to bootstrap node if we're not it
+if (p2p.ListenPort != BASE_PORT)
+{
+    Console.WriteLine($"[P2P] Connecting to bootstrap at {BASE_PORT}...");
+    await p2p.ConnectToPeerAsync("127.0.0.1", BASE_PORT);
 }
 
-string? choice;
+Console.CursorVisible = true;
+Console.Write("\n  Connect to additional peer port (blank to skip): ");
+string? extraPeer = Console.ReadLine()?.Trim();
+Console.CursorVisible = false;
+if (int.TryParse(extraPeer, out int extraPort) && extraPort != p2p.ListenPort)
+    await p2p.ConnectToPeerAsync("127.0.0.1", extraPort);
 
+logger.Info("Node", $"Node ready — user '{device.Name}' on port {p2p.ListenPort}");
+
+// Build wallet lookup (all wallets this node manages)
+var localWallets = new Dictionary<string, Wallet>(StringComparer.OrdinalIgnoreCase);
+foreach (var w in savedWallets) localWallets[w.Name] = w;
+localWallets[device.Name] = device; // ensure active wallet is present
+
+// ── Log buffer ────────────────────────────────────────────────────────────────
+const int LOG_LINES = 16;
+var log = new List<(string text, ConsoleColor color)>();
+
+void Log(string text, ConsoleColor color = ConsoleColor.Gray) =>
+    log.Add(("  " + text, color));
+void LogOk(string msg) => Log("✓ " + msg, ConsoleColor.Green);
+void LogWarn(string msg) => Log("⚠ " + msg, ConsoleColor.Yellow);
+void LogInfo(string msg) => Log("  " + msg, ConsoleColor.DarkGray);
+void LogLine(string msg = "") => Log(msg, ConsoleColor.DarkGray);
+void LogDiv() => Log(new string('─', 54), ConsoleColor.DarkGray);
+void LogHead(string title)
+{
+    LogLine();
+    Log($"── {title.ToUpper()} " + new string('─', Math.Max(0, 40 - title.Length)), ConsoleColor.Cyan);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+void Render()
+{
+    var visible = log.TakeLast(LOG_LINES).ToList();
+    for (int i = visible.Count; i < LOG_LINES; i++) Console.WriteLine();
+    int maxW = Math.Max(20, Console.WindowWidth - 1);
+    foreach (var (text, color) in visible)
+    {
+        Console.ForegroundColor = color;
+        Console.WriteLine((text.Length > maxW ? text[..maxW] : text).PadRight(maxW));
+    }
+    Console.ResetColor();
+    PrintMenu(device, blockchain);
+}
+
+string Ask(string label)
+{
+    Console.CursorVisible = true;
+    Console.Write($"  {label}: ");
+    string? v = Console.ReadLine()?.Trim();
+    Console.CursorVisible = false;
+    return v ?? "";
+}
+
+string AskPassword(string label)
+{
+    Console.CursorVisible = true;
+    Console.Write($"  {label}: ");
+    var sb = new System.Text.StringBuilder();
+    ConsoleKeyInfo key;
+    while ((key = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
+    {
+        if (key.Key == ConsoleKey.Backspace && sb.Length > 0) { sb.Remove(sb.Length - 1, 1); Console.Write("\b \b"); }
+        else if (key.Key != ConsoleKey.Backspace) { sb.Append(key.KeyChar); Console.Write('*'); }
+    }
+    Console.WriteLine();
+    Console.CursorVisible = false;
+    return sb.ToString();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+string? choice;
 do
 {
-    Console.WriteLine(new string('=', 50));
-    Console.WriteLine($"|| {device.Name}:{blockchain.GetPendingBalance(device.Address)} ||");
-    Console.WriteLine(new string('=', 50));
-    Console.WriteLine("1: Display Blockchain");
-    Console.WriteLine("2: Add Block");
-    Console.WriteLine("3: Add Transaction");
-    Console.WriteLine("4: View Banace");
-    Console.WriteLine("5: Validate BlockChain");
-    Console.WriteLine("6: Get Block by Index");
-    Console.WriteLine("7: Initiate testing");
-    Console.WriteLine("8: Vanity Mining Demo");
-    Console.WriteLine("9: Smart Chunking + Address Validation Demo");
-    Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
-    Console.WriteLine("0: Exit");
-    Console.WriteLine(new string('-', 50));
-    choice = Console.ReadLine();
-    Console.WriteLine(new string('=', 50));
+    Render();
+    Console.CursorVisible = true;
+    choice = Console.ReadLine()?.Trim();
+    Console.CursorVisible = false;
 
     switch (choice)
     {
-        case "1":
-            display.PrintBlockChain(blockchain.Chain);
-            break;
-
-        case "2":
-            //var trans = transactionService.CreateTransaction(w_Mark, w_Alice.Address, 10, w_Mark.PublicKey);
-            //var trans1 = transactionService.CreateTransaction(w_Alice, w_Mark.Address, 10, w_Alice.PublicKey);
-            //if (trans == null || trans1 == null)
-            //{
-            //    Console.WriteLine("Transaction creation failed. Check balances and try again.");
-            //    break;
-            //}
-            Console.Write("Enter (1) for multithreaded (2) for generating in net: ");
-            string select = Console.ReadLine() ?? "";
-            if (select == "1")
-            {
-                Console.Write("How many coins to generate: ");
-                if (!int.TryParse(Console.ReadLine(), out int c)) break;
-
-                for (int i = 0; i < c; i++)
-                {
-                    p2pService.BroadcastNewBlock(await blockchain.MineBlockAsync(device.Address));
-                }
-            }
-            else if (select == "2")
-            {
-                Console.Write("How many coins to generate: ");
-                if (!int.TryParse(Console.ReadLine(), out int count)) break;
-
-                for (int i = 0; i < count; i++)
-                {
-                    using var cts = new CancellationTokenSource();
-
-                    var networkSimTask = Task.Run(async () =>
-                    {
-                        int delay = Random.Shared.Next(2000, 8000);
-                        Console.WriteLine($"[Network] Other node is generating block. Awaiting answer in ~{delay / 1000}s");
-                        await Task.Delay(delay);
-                        if (!cts.Token.IsCancellationRequested)
-                        {
-                            Console.WriteLine("\n[Network] Block already generated. Canceling...");
-                            cts.Cancel();
-                        }
-                    });
-
-                    var mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
-
-                    if (mined!=null)
-                    {
-                        Console.WriteLine("[Network] Block generated. Adding it.");
-                        p2pService.BroadcastNewBlock(mined);
-                        cts.Cancel();
-                    }
-
-                    try { await networkSimTask; } catch { }
-                }
-            }
-            else
-            {
-                Console.WriteLine("Wrong input");
-            }
-            break;
-
-        case "3":
-            Console.Write("From (wallet name): ");
-            string from = Console.ReadLine() ?? "";
-            Console.Write("To (wallet name or address): ");
-            string to = Console.ReadLine() ?? "";
-            Console.Write("Amount: ");
-            if (!decimal.TryParse(Console.ReadLine(), out decimal amount)) break;
-
-            if (!walletRegistry.ContainsKey(from))
-            {
-                Console.WriteLine($"Wallet '{from}' not found. Available wallets: {string.Join(", ", walletRegistry.Keys)}");
-                break;
-            }
-
-            var walletFrom = walletRegistry[from];
-
-            // Convert wallet name to address if needed
-            string toAddress = to;
-            if (walletRegistry.ContainsKey(to))
-            {
-                toAddress = walletRegistry[to].Address;
-            }
-
-            try
-            {
-                var transaction = transactionService.CreateTransaction(walletFrom, toAddress, amount, walletFrom.PublicKey);
-                if (transaction == null)
-                {
-                    Console.WriteLine("Transaction creation failed.");
-                    break;
-                }
-
-                // Add transaction to mempool
-                blockchain.AddTransactionToMempool(transaction);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-            }
-            break;
-
-        case "4":
-            Console.WriteLine("\n=== Wallet Balances ===");
-            foreach (var kvp in walletRegistry)
-            {
-                decimal balance = walletService.GetBalance(kvp.Value.Address);
-                Console.WriteLine($"{kvp.Key}: {balance}");
-            }
-            break;
-
-        case "5":
-            if (blockchain.IsValid())
-                Console.WriteLine("All Blockchain is valid");
-            else
-            {
-                Console.WriteLine("Integrity compromised!");
-                display.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
-            }
-            break;
-
-        case "6":
-            Console.Write("Block Index: ");
-            if (int.TryParse(Console.ReadLine(), out int idx))
-                display.PrintBlock(null, null, idx - 1);
-            break;
-        case "7":
-            //await RunMempoolDemo();
-            break;
-        case "8":
-            Console.WriteLine("FIX THIS.");
-            //await TestVanityMining();
-            break;
-        case "9":
-            Console.WriteLine("FIX THIS.");
-            //RunSmartChunkingDemo();
-            break;
-        case "10":
-            //await RunEconomyAudit();
-            break;
+        case "1": HandleViewChain(); break;
+        case "2": HandleViewBlock(); break;
+        case "3": await HandleMine(); break;
+        case "4": HandleViewMempool(); break;
+        case "5": await HandleSendTx(); break;
+        case "6": HandleBalances(); break;
+        case "7": HandleValidate(); break;
+        case "8": HandleEconomyAudit(); break;
+        case "9": HandleCreateWallet(); break;
+        case "P": HandleViewPeers(); break;
+        case "S": HandleSwitchWallet(); break;
+        case "0": break;
         default:
-            if (choice != "0")
-                Console.WriteLine("Incorrect. Try again.");
+            if (choice != null) LogWarn("Unknown option.");
             break;
     }
 }
 while (choice != "0");
 
-//Console.WriteLine(new string('=', 20));
-//blockchain.Chain[1].Data = "Bob -> ???: 99999999999";
-//displayblockchain.PrintValidationResult(blockchain.IsValid());
-//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
+Console.CursorVisible = true;
+logger.Info("Node", "Shutdown");
+Goodbye();
 
+// ── Login screen ──────────────────────────────────────────────────────────────
 
-//Console.WriteLine(new string('=', 20));
-//blockchain.Chain[2].Author = "John";
-//displayblockchain.PrintValidationResult(blockchain.IsValid());
-//displayblockchain.PrintBlock(null, null, blockchain.GetInvalidBlockIndex());
-
-
-//Console.WriteLine(new string('=', 20));
-//displayblockchain.PrintBlock(blockchain.FindBlockByHash(blockchain.Chain[1].Hash));
-
-
-//Console.WriteLine(new string('=', 20));
-
-//var hashingService = new HashingService();
-
-//string str1 = "Hello";
-//string str2 = "hello";
-
-//string hash1 = hashingService.ComputeHash_P(str1);
-//string hash2 = hashingService.ComputeHash_P(str2);
-
-//Console.WriteLine($"Hash 1: \"{str1}\" => {hash1}");
-//Console.WriteLine($"Hash 2: \"{str2}\" => {hash2}");
-
-//int diffCount = 0;
-//for (int i = 0; i < hash1.Length; i++)
-//{
-//    if (hash1[i] != hash2[i])
-//        diffCount++;
-//}
-
-//double changePercent = (double)diffCount / hash1.Length * 100;
-
-//Console.WriteLine($"Different chars: {diffCount} / {hash1.Length}");
-//Console.WriteLine($"Hash change: {changePercent}%");
-
-/*
-static void PrintResult(string testName, bool passed)
+Wallet LoginScreen(List<Wallet> saved)
 {
-    string status = passed ? "[TEST COMPLETED]" : "[TEST FAILED]";
-    Console.WriteLine($"{status} {testName}\n");
-}
-void TestSystem()
-{
-    Console.WriteLine("=== Test 1: Default workload ===");
-    var bc = new BlockChainService();
-    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-    bc.AddBlock("Carol", "TX: Carol->Alice: 2");
-    bool valid = bc.IsValid();
-    Console.WriteLine($"IsValid = {valid}");
-    PrintResult("Default workload", valid == true);
-
-    Console.WriteLine("=== Test 2: Corrupted Duration ===");
-    bc = new BlockChainService();
-    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-
-    Block last = bc.Chain.Last();
-    last.MiningDuration = 9999;
-    var hs = new HashingService();
-    last.Hash = hs.ComputeHash(last);
-
-    valid = bc.IsValid();
-    Console.WriteLine($"IsValid = {valid} — Duration Corrupted!");
-    PrintResult("[Attack]: Corrupted Duration", valid == false);
-
-    Console.WriteLine("=== Test 3: Negative Duration ===");
-    bc = new BlockChainService();
-    bc.AddBlock("Alice", "TX: Alice->Bob: 10");
-    bc.AddBlock("Bob", "TX: Bob->Carol: 5");
-
-    last = bc.Chain.Last();
-    last.MiningDuration = -10;
-    hs = new HashingService();
-    last.Hash = hs.ComputeHash(last);
-
-    valid = bc.IsValid();
-    Console.WriteLine($"IsValid = {valid}");
-    PrintResult("[Attack]: Negative Duration", valid == false);
-
-    Console.WriteLine("=== Test 4: Difficulty limit ===");
-    bc = new BlockChainService(targetBlockTime: 500);
-    Console.WriteLine($"Initial difficulty: {bc.Difficulty}");
-
-    bc.AddBlock("A", "block 1");
-    bc.AddBlock("B", "block 2");
-    bc.AddBlock("C", "block 3");
-    bc.AddBlock("D", "block 4");
-
-    int d = bc.Difficulty;
-    Console.WriteLine($"Difficulty after 4 blocks: {d}");
-    Console.WriteLine($"Max possible with +1 limit: 5");
-
-    bool limitHeld = d >= 2 && d <= 5;
-    PrintResult("[Attack]: Difficulty limit", limitHeld);
-}
-
-async Task TestVanityMining()
-{
-    Console.WriteLine("=== Vanity Mining Demo (target prefix: \"cafe\") ===");
-    var bc = new BlockChainService();
-    await bc.AddBlockAsync("Alice", "TX: Alice->Bob: 10");
-    await bc.AddBlockAsync("Bob", "TX: Bob->Carol: 5");
-    await bc.AddBlockAsync("Carol", "TX: Carol->Alice: 2");
-
-    foreach (var b in bc.Chain)
-        Console.WriteLine($"Index {b.Index} | Hash: {b.Hash}");
-
-    PrintResult("Vanity Mining", bc.IsValid());
-}
-
-
- * void RunMalleabilityDemo()
-{
-    Console.WriteLine("=== Частина 1: Атака колізії (наївна конкатенація From+To+Amount) ===");
-    static string NaiveId(string from, string to, decimal amount)
+    Console.CursorVisible = true;
+    while (true)
     {
-        var bytes = System.Text.Encoding.UTF8.GetBytes($"{from}{to}{amount}");
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
-    }
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("  ╔══════════════════════════════════════════╗");
+        Console.WriteLine("  ║           ACCOUNT LOGIN                  ║");
+        Console.WriteLine("  ╠══════════════════════════════════════════╣");
+        Console.ResetColor();
 
-    var tx1 = new Transaction("Ali", "ceBob", 100);
-    var tx2 = new Transaction("Alice", "Bob", 100);
-
-    string naive1 = NaiveId(tx1.From, tx1.To, tx1.Amount);
-    string naive2 = NaiveId(tx2.From, tx2.To, tx2.Amount);
-
-    Console.WriteLine($"Tx1: {tx1.From} -> {tx1.To}, {tx1.Amount} | NaiveId: {naive1}");
-    Console.WriteLine($"Tx2: {tx2.From} -> {tx2.To}, {tx2.Amount} | NaiveId: {naive2}");
-    Console.WriteLine(naive1 == naive2 ? "Увага! Знайдено колізію: Tx1.Id == Tx2.Id" : "Колізії не знайдено.");
-
-    Console.WriteLine("\n=== Частина 2: Виправлена версія (Transaction.Id = SHA256(ToRawString())) ===");
-    Console.WriteLine($"Tx1 FixedId: {tx1.Id}");
-    Console.WriteLine($"Tx2 FixedId: {tx2.Id}");
-    Console.WriteLine(tx1.Id != tx2.Id ? "Колізію усунено: Id тепер відрізняються." : "Помилка: колізія досі існує!");
-
-    Console.WriteLine("\n=== Частина 3: Byte-ліміт блоку (MaxBlockSizeBytes) ===");
-    var bigTxs = new List<Transaction>();
-    for (int i = 0; i < 10; i++)
-        bigTxs.Add(new Transaction(FakeAddress(2000 + i), FakeAddress(3000 + i), 1000 + i));
-
-    blockchain.AddBlock(bigTxs);
-    var lastBlock = blockchain.Chain.Last();
-    int weight = lastBlock.Transactions.Sum(t => System.Text.Encoding.UTF8.GetByteCount(t.ToRawString()));
-    Console.WriteLine($"Передано транзакцій: {bigTxs.Count}, влізло у блок: {lastBlock.Transactions.Count}");
-    Console.WriteLine($"Фінальна вага блоку: {weight} байт (ліміт {blockchain.MaxBlockSizeBytes})");
-}
-
-
-static string FakeAddress(int n) => "0x" + n.ToString("x").PadLeft(40, '0');
-
-void RunSmartChunkingDemo()
-{
-    Console.WriteLine("=== Smart Chunking Demo: 15 valid transactions ===");
-    var txs = new List<Transaction>();
-    for (int i = 0; i < 15; i++)
-        txs.Add(new Transaction(FakeAddress(100 + i), FakeAddress(200 + i), 1 + i));
-
-    int before = blockchain.Chain.Count;
-    blockchain.ProcessTransactions(txs);
-    int after = blockchain.Chain.Count;
-    Console.WriteLine($"\nResult: {after - before} new block(s) mined, no transactions lost.");
-
-    Console.WriteLine("\n=== Invalid address rejection demo ===");
-    var badTx = new Transaction("Bob", FakeAddress(999), 5);
-    blockchain.ProcessTransactions(new List<Transaction> { badTx });
-}
-
-var trans1 = new Transaction(FakeAddress(1), FakeAddress(2), 10);
-var trans2 = new Transaction(FakeAddress(2), FakeAddress(3), 100);
-var trans3 = new Transaction(FakeAddress(4), FakeAddress(5), 50);
-
-
-async Task RunEconomyAudit()
-{
-    Console.WriteLine("=== Part 1: Attack Double Spend ===");
-    var bc = new BlockChainService();
-    var ws = new WalletService(bc.Chain);
-    var ts = new TransactionService(bc);
-    var aliceW = ws.CreateWallet("Alice");
-    var bobW = ws.CreateWallet("Bob");
-    var carloW = ws.CreateWallet("Carlo");
-    var minerW = ws.CreateWallet("Miner");
-
-    await bc.MineBlockAsync(aliceW.Address);
-    Console.WriteLine($"Balance of Alice: {ws.GetBalance(aliceW.Address)}");
-
-    var tx1 = ts.CreateTransaction(aliceW, bobW.Address, 50, aliceW.PublicKey);
-    var tx2 = ts.CreateTransaction(aliceW, carloW.Address, 50, aliceW.PublicKey);
-    try
-    {
-        bc.AddTransactionToMempool(tx1);
-        bc.AddTransactionToMempool(tx2);
-        await bc.MineBlockAsync(minerW.Address);
-        Console.WriteLine("ERROR: attack had an effect!");
-    }
-    catch (InvalidOperationException ex)
-    {
-        Console.WriteLine($"Attack blocked: {ex.Message}");
-    }
-
-    Console.WriteLine("\n=== Part 2: Hard Cap (MaxSupply=1000) ===");
-    for (int i = 1; i <= 22; i++)
-    {
-        await bc.MineBlockAsync(minerW.Address);
-        if (i is >= 18 and <= 21)
-            Console.WriteLine($"Block #{i}: TotalMinted={bc.TotalMinted}, Miners balance={ws.GetBalance(minerW.Address)}");
-    }
-
-    Console.WriteLine("\n=== Part 3: Audit of economics (Proof of Reserves) ===");
-    bool ok = bc.ValidateEconomy();
-    Console.WriteLine($"ValidateEconomy(): {ok}");
-}
-
-
-async Task RunMempoolDemo()
-{
-    Console.WriteLine("\n" + new string('=', 60));
-    Console.WriteLine("=== MEMPOOL DEMO: DDoS + RBF + Shadow Balance ===");
-    Console.WriteLine(new string('=', 60));
-
-    var bc = new BlockChainService();
-    var ws = new WalletService(bc.Chain);
-    var ts = new TransactionService(bc);
-
-    var hacker = ws.CreateWallet("Hacker");
-    var alice = ws.CreateWallet("Alice");
-    var bob = ws.CreateWallet("Bob");
-    var carlo = ws.CreateWallet("Carlo");
-    var miner = ws.CreateWallet("Miner");
-
-    // Fund wallets: mine 2 blocks to alice, 2 to bob
-    Console.WriteLine("\n[Setup] Mining initial blocks to fund wallets...");
-    await bc.MineBlockAsync(alice.Address);
-    await bc.MineBlockAsync(alice.Address);
-    await bc.MineBlockAsync(bob.Address);
-    await bc.MineBlockAsync(bob.Address);
-    // Clear mempool coinbase txs by mining them
-    await bc.MineBlockAsync(miner.Address);
-
-    Console.WriteLine($"[Setup] Alice balance: {ws.GetBalance(alice.Address)}");
-    Console.WriteLine($"[Setup] Bob balance:   {ws.GetBalance(bob.Address)}");
-
-    // ── Part 1: Spam / DDoS ──────────────────────────────────────
-    Console.WriteLine("\n--- Part 1: DDoS Spam Attack (10 txs, Fee=0) ---");
-    int spamAccepted = 0, spamRejected = 0;
-    for (int i = 0; i < 10; i++)
-    {
-        try
+        if (saved.Count == 0)
         {
-
-            var spamTx = ts.CreateTransaction(alice, hacker.Address, 1, alice.PublicKey);
-            spamTx.GetType().GetProperty("Fee")?.SetValue(spamTx, 0m);
-
-            var rawSpam = new Transaction(alice.Address, hacker.Address, 1, alice.PublicKey);
-            rawSpam.Fee = 0;
-            rawSpam.Signature = alice.Sign(rawSpam.GetDataToSign());
-            bc.AddTransactionToMempool(rawSpam);
-            spamAccepted++;
-            Console.WriteLine($"  Spam tx #{i + 1}: ACCEPTED (mempool={bc.PendingTransactions.Count})");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("  ║  (no saved wallets)                      ║");
+            Console.ResetColor();
         }
-        catch (Exception ex)
+        else
         {
-            spamRejected++;
-            Console.WriteLine($"  Spam tx #{i + 1}: REJECTED — {ex.Message}");
+            for (int i = 0; i < saved.Count; i++)
+            {
+                string line = $"  [{i + 1}] {saved[i].Name}";
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.Write("  ║  ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write($"[{i + 1}]");
+                Console.ResetColor();
+                Console.Write($" {saved[i].Name}".PadRight(37));
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine("║");
+                Console.ResetColor();
+            }
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("  ╠══════════════════════════════════════════╣");
+        Console.ResetColor();
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.Write("  ║  ");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.Write("[N]");
+        Console.ResetColor();
+        Console.Write(" Create new account".PadRight(37));
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("║");
+        Console.WriteLine("  ╚══════════════════════════════════════════╝");
+        Console.ResetColor();
+
+        Console.Write("  › ");
+        string? pick = Console.ReadLine()?.Trim();
+
+        // Create new account
+        if (pick?.ToUpper() == "N" || pick == "0" && saved.Count == 0)
+        {
+            Console.Write("  Name: ");
+            string newName = Console.ReadLine()?.Trim() ?? "User";
+            if (string.IsNullOrEmpty(newName)) newName = "User";
+
+            // Check name not taken
+            if (saved.Any(w => w.Name.Equals(newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                PrintColorLine($"  ✗ Account '{newName}' already exists.", ConsoleColor.Red);
+                continue;
+            }
+
+            string pwd = ReadPassword("  Password: ");
+            string pwd2 = ReadPassword("  Confirm:  ");
+            if (pwd != pwd2) { PrintColorLine("  ✗ Passwords do not match.", ConsoleColor.Red); continue; }
+            if (pwd.Length < 4) { PrintColorLine("  ✗ Password too short (min 4).", ConsoleColor.Red); continue; }
+
+            var wallet = Wallet.Create(newName, pwd);
+            saved.Add(wallet);
+            storage.SaveWallets(saved);
+            PrintColorLine($"  ✓ Account '{newName}' created.", ConsoleColor.Green);
+            logger.Info("Login", $"New account created: {newName}");
+            Console.CursorVisible = false;
+            return wallet;
+        }
+
+        // Login to existing account by number
+        if (int.TryParse(pick, out int idx) && idx >= 1 && idx <= saved.Count)
+        {
+            var candidate = saved[idx - 1];
+            string pwd = ReadPassword($"  Password for '{candidate.Name}': ");
+
+            if (candidate.Unlock(pwd))
+            {
+                PrintColorLine($"  ✓ Logged in as '{candidate.Name}'.", ConsoleColor.Green);
+                logger.Info("Login", $"Login OK: {candidate.Name}");
+                Console.CursorVisible = false;
+                return candidate;
+            }
+            else
+            {
+                PrintColorLine("  ✗ Wrong password.", ConsoleColor.Red);
+                logger.Warn("Login", $"Failed login attempt for '{candidate.Name}'");
+            }
+        }
+        else if (pick != null)
+        {
+            PrintColorLine("  ✗ Invalid choice.", ConsoleColor.Red);
         }
     }
-    Console.WriteLine($"[Result] Accepted={spamAccepted}, Rejected={spamRejected}, Mempool size={bc.PendingTransactions.Count}/{bc.MaxMempoolSize}");
-
-    // ── Part 2a: Alice evicts cheapest spam ───────────────────────
-    Console.WriteLine("\n--- Part 2: Alice sends tx with Fee=10 (evicts cheapest spam) ---");
-    try
-    {
-        var aliceTx = new Transaction(alice.Address, carlo.Address, 5, alice.PublicKey);
-        aliceTx.Fee = 10;
-        aliceTx.Signature = alice.Sign(aliceTx.GetDataToSign());
-        bc.AddTransactionToMempool(aliceTx);
-        Console.WriteLine($"[Result] Alice tx ACCEPTED. Mempool size={bc.PendingTransactions.Count}");
-        Console.WriteLine($"  Min fee in mempool: {bc.PendingTransactions.Min(t => t.Fee)}");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[Result] Alice tx REJECTED — {ex.Message}");
-    }
-
-    // ── Part 2b: RBF ─────────────────────────────────────────────
-    Console.WriteLine("\n--- Part 3: RBF — Bob sends 20 to Carlo, Fee=1, then bumps to Fee=15 ---");
-    try
-    {
-        var bobTx1 = new Transaction(bob.Address, carlo.Address, 20, bob.PublicKey);
-        bobTx1.Fee = 1;
-        bobTx1.Signature = bob.Sign(bobTx1.GetDataToSign());
-        bc.AddTransactionToMempool(bobTx1);
-        Console.WriteLine($"  Bob tx1 (Fee=1) ACCEPTED. Mempool={bc.PendingTransactions.Count}");
-    }
-    catch (Exception ex) { Console.WriteLine($"  Bob tx1 REJECTED — {ex.Message}"); }
-
-    try
-    {
-        var bobTx2 = new Transaction(bob.Address, carlo.Address, 20, bob.PublicKey);
-        bobTx2.Fee = 15;
-        bobTx2.Signature = bob.Sign(bobTx2.GetDataToSign());
-        bc.AddTransactionToMempool(bobTx2);
-        Console.WriteLine($"  Bob tx2 (Fee=15) — RBF applied. Mempool={bc.PendingTransactions.Count}");
-    }
-    catch (Exception ex) { Console.WriteLine($"  Bob tx2 REJECTED — {ex.Message}"); }
-
-    // ── Part 3: Shadow / Pending Balance ─────────────────────────
-    Console.WriteLine("\n--- Part 4: Shadow Balance — Alice tries to double-spend via mempool ---");
-    Console.WriteLine($"  Alice confirmed balance: {ws.GetBalance(alice.Address)}");
-    Console.WriteLine($"  Alice pending balance:   {bc.GetPendingBalance(alice.Address)}");
-
-    // Alice already has a pending tx (5 + fee=10 = 15 reserved).
-    // Try to send another large amount that would exceed pending balance.
-    try
-    {
-        var aliceTx2 = new Transaction(alice.Address, bob.Address, 90, alice.PublicKey);
-        aliceTx2.Fee = 5;
-        aliceTx2.Signature = alice.Sign(aliceTx2.GetDataToSign());
-        bc.AddTransactionToMempool(aliceTx2);
-        Console.WriteLine("  Alice tx2: ACCEPTED (unexpected)");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"  Alice tx2 REJECTED (shadow balance protection) — {ex.Message}");
-    }
-
-    // ── Part 4: Miner picks top 2 txs ────────────────────────────
-    Console.WriteLine("\n--- Part 5: Miner mines block (takes top fee txs) ---");
-    Console.WriteLine($"  Mempool before mining ({bc.PendingTransactions.Count} txs):");
-    foreach (var tx in bc.PendingTransactions.OrderByDescending(t => t.Fee))
-        Console.WriteLine($"    {tx.From[..8]}... -> {tx.To[..8]}... | Amount={tx.Amount} Fee={tx.Fee}");
-
-    // Limit block to 2 txs by temporarily working with top 2
-    var top2 = bc.PendingTransactions.OrderByDescending(t => t.Fee).Take(2).ToList();
-    var remaining = bc.PendingTransactions.Except(top2).ToList();
-    bc.PendingTransactions.Clear();
-    foreach (var tx in top2) bc.PendingTransactions.Add(tx);
-
-    await bc.MineBlockAsync(miner.Address);
-
-    // Restore remaining spam to mempool
-    foreach (var tx in remaining) bc.PendingTransactions.Add(tx);
-
-    Console.WriteLine($"\n  Mempool after mining ({bc.PendingTransactions.Count} txs remain — spam stays):");
-    foreach (var tx in bc.PendingTransactions)
-        Console.WriteLine($"    Fee={tx.Fee}");
-
-    Console.WriteLine("\n" + new string('=', 60));
-    Console.WriteLine("=== DEMO COMPLETE ===");
-    Console.WriteLine(new string('=', 60) + "\n");
 }
-*/
+
+static string ReadPassword(string prompt)
+{
+    Console.Write(prompt);
+    var sb = new System.Text.StringBuilder();
+    ConsoleKeyInfo key;
+    while ((key = Console.ReadKey(intercept: true)).Key != ConsoleKey.Enter)
+    {
+        if (key.Key == ConsoleKey.Backspace && sb.Length > 0) { sb.Remove(sb.Length - 1, 1); Console.Write("\b \b"); }
+        else if (key.Key != ConsoleKey.Backspace) { sb.Append(key.KeyChar); Console.Write('*'); }
+    }
+    Console.WriteLine();
+    return sb.ToString();
+}
+
+static void PrintColorLine(string msg, ConsoleColor color)
+{
+    Console.ForegroundColor = color;
+    Console.WriteLine(msg);
+    Console.ResetColor();
+    System.Threading.Thread.Sleep(800);
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
+void HandleViewChain()
+{
+    log.Clear();
+    LogHead("Blockchain");
+    LogDiv();
+    foreach (var block in blockchain.Chain)
+    {
+        LogLine();
+        Log($"  Block #{block.Index}", ConsoleColor.Cyan);
+        LogInfo($"  Hash:     {block.Hash}");
+        LogInfo($"  PrevHash: {block.PreviousHash}");
+        LogInfo($"  Diff: {block.Difficulty}  Nonce: {block.Nonce}  Time: {block.MiningDuration:F2}s");
+        LogInfo($"  Stamp: {block.TimeStamp}");
+        if (block.Transactions.Count == 0)
+            LogInfo("  [Genesis Block]");
+        else
+            foreach (var tx in block.Transactions)
+                LogInfo("  " + tx.ToRawString());
+        LogDiv();
+    }
+    LogInfo($"Total blocks: {blockchain.Chain.Count}");
+}
+
+void HandleViewBlock()
+{
+    string raw = Ask("Block index");
+    log.Clear();
+    LogHead("View Block");
+    if (!int.TryParse(raw, out int idx)) { LogWarn("Invalid index."); return; }
+    var block = blockchain.Chain.ElementAtOrDefault(idx);
+    if (block == null) { LogWarn($"Block #{idx} not found."); return; }
+    LogDiv();
+    Log($"  Block #{block.Index}", ConsoleColor.Cyan);
+    LogInfo($"  Hash:     {block.Hash}");
+    LogInfo($"  PrevHash: {block.PreviousHash}");
+    LogInfo($"  Diff: {block.Difficulty}  Nonce: {block.Nonce}  Mined in: {block.MiningDuration:F2}s");
+    LogInfo($"  Stamp: {block.TimeStamp}");
+    LogDiv();
+    if (block.Transactions.Count == 0)
+        LogInfo("  [Genesis Block]");
+    else
+        foreach (var tx in block.Transactions)
+            LogInfo("  " + tx.ToRawString());
+}
+
+async Task HandleMine()
+{
+    string mode = Ask("[1] local  [2] network race");
+    string rawCount = Ask("How many blocks");
+    log.Clear();
+    LogHead("Mine Block");
+    if (!int.TryParse(rawCount, out int count) || count < 1) { LogWarn("Invalid count."); return; }
+
+    if (mode == "1")
+    {
+        for (int i = 0; i < count; i++)
+        {
+            LogInfo($"Mining block {i + 1}/{count}...");
+            Render();
+            var block = await blockchain.MineBlockAsync(device.Address);
+            if (block != null)
+            {
+                p2p.BroadcastNewBlock(block);
+                p2p.BroadcastMempool();
+                LogOk($"Block #{block.Index} mined — {block.Hash[..12]}… ({block.MiningDuration:F2}s)");
+            }
+        }
+    }
+    else if (mode == "2")
+    {
+        for (int i = 0; i < count; i++)
+        {
+            using var cts = new CancellationTokenSource();
+            int delay = Random.Shared.Next(2000, 8000);
+            LogInfo($"[Net] Simulated peer mining (~{delay / 1000}s)");
+            Render();
+            _ = Task.Delay(delay).ContinueWith(_ =>
+            {
+                if (!cts.IsCancellationRequested) { LogWarn("[Net] Other node won."); cts.Cancel(); }
+            });
+            var mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
+            if (mined != null)
+            {
+                LogOk("[Net] You won!"); p2p.BroadcastNewBlock(mined); p2p.BroadcastMempool(); cts.Cancel();
+            }
+        }
+    }
+    else { LogWarn("Invalid mode."); }
+}
+
+void HandleViewMempool()
+{
+    log.Clear();
+    LogHead("Mempool");
+    if (blockchain.PendingTransactions.Count == 0) { LogLine(); LogInfo("(empty)"); return; }
+    LogInfo($"{blockchain.PendingTransactions.Count}/{blockchain.MaxMempoolSize} transactions");
+    LogDiv();
+    foreach (var tx in blockchain.PendingTransactions.OrderByDescending(t => t.Fee))
+        LogInfo($"  {ResolveAddress(tx.From),-14} → {ResolveAddress(tx.To),-14}  {tx.Amount,8} | fee {tx.Fee}");
+}
+
+async Task HandleSendTx()
+{
+    string from = Ask("From (wallet name)");
+    string to = Ask("To   (name or offline peer)");
+    string rawAmt = Ask("Amount");
+    string rawFee = Ask("Fee");
+    log.Clear();
+    LogHead("Send Transaction");
+
+    if (!localWallets.TryGetValue(from, out var senderWallet))
+    { LogWarn($"Wallet '{from}' not found."); return; }
+
+    if (!senderWallet.IsUnlocked)
+    {
+        string pwd = AskPassword($"Password for '{from}'");
+        if (!senderWallet.Unlock(pwd)) { LogWarn("Wrong password."); return; }
+    }
+
+    string toAddress;
+    if (localWallets.TryGetValue(to, out var localTarget))
+        toAddress = localTarget.Address;
+    else
+    {
+        var peer = p2p.KnownWallets.Values.FirstOrDefault(w =>
+            w.Name.Equals(to, StringComparison.OrdinalIgnoreCase) || w.Address == to);
+        if (peer != null) toAddress = peer.Address;
+        else { LogWarn($"Recipient '{to}' not found."); return; }
+    }
+
+    if (!decimal.TryParse(rawAmt, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out decimal amount))
+    { LogWarn("Invalid amount."); return; }
+    if (!decimal.TryParse(rawFee, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out decimal fee))
+    { LogWarn("Invalid fee."); return; }
+
+    try
+    {
+        var tx = txService.CreateTransaction(senderWallet, toAddress, amount, senderWallet.PublicKey);
+        if (tx == null) { LogWarn("Transaction creation failed."); return; }
+        tx.Fee = fee;
+        tx.Signature = senderWallet.Sign(tx.GetDataToSign());
+        blockchain.AddTransactionToMempool(tx);
+        p2p.BroadcastTransaction(tx);
+        p2p.BroadcastMempool();
+        LogOk($"Sent {amount:F4} from {from} → {to}  (fee {fee:F4})");
+        LogInfo($"  Pending balance: {blockchain.GetPendingBalance(senderWallet.Address):F4}");
+        logger.Info("Tx", $"{from}→{to} amount={amount} fee={fee}");
+    }
+    catch (Exception ex) { LogWarn(ex.Message); }
+}
+
+void HandleBalances()
+{
+    log.Clear();
+    LogHead("Wallet Balances");
+    int w = localWallets.Keys.Max(k => k.Length) + 2;
+    LogLine();
+    LogInfo($"  {"Name".PadRight(w)} {"Confirmed",12}  {"Pending",12}  (local)");
+    LogDiv();
+    foreach (var (n, wallet) in localWallets)
+    {
+        decimal c = walletService.GetBalance(wallet.Address);
+        decimal p = blockchain.GetPendingBalance(wallet.Address);
+        LogInfo($"  {n.PadRight(w)} {c,12:F4}  {p,12:F4}" + (n == device.Name ? "  ◀ active" : ""));
+    }
+    if (p2p.KnownWallets.Count > 0)
+    {
+        LogLine();
+        LogInfo($"  {"Name".PadRight(w)} {"Confirmed",12}  (peers)");
+        LogDiv();
+        foreach (var pw in p2p.KnownWallets.Values)
+            LogInfo($"  {pw.Name.PadRight(w)} {walletService.GetBalance(pw.Address),12:F4}");
+    }
+}
+
+void HandleValidate()
+{
+    log.Clear();
+    LogHead("Validate Blockchain");
+    LogDiv();
+    bool valid = blockchain.IsValid();
+    if (valid) { LogOk("Blockchain is valid."); }
+    else
+    {
+        LogWarn("Integrity compromised!");
+        int bad = blockchain.GetInvalidBlockIndex();
+        if (bad >= 0)
+        {
+            LogWarn($"First bad block: #{bad}");
+            var b = blockchain.Chain.ElementAtOrDefault(bad);
+            if (b != null) { LogDiv(); LogInfo($"  Hash: {b.Hash}"); LogInfo($"  Prev: {b.PreviousHash}"); }
+        }
+    }
+}
+
+void HandleEconomyAudit()
+{
+    log.Clear();
+    LogHead("Economy Audit");
+    LogDiv();
+    bool ok = blockchain.ValidateEconomy();
+    if (ok) LogOk("Economy consistent. Proof of Reserves passed.");
+    else LogWarn("Economy mismatch! Possible double-spend or minting error.");
+}
+
+void HandleCreateWallet()
+{
+    string wname = Ask("New wallet name");
+    log.Clear();
+    LogHead("Create Wallet");
+    if (string.IsNullOrEmpty(wname)) { LogWarn("Name cannot be empty."); return; }
+    if (localWallets.ContainsKey(wname)) { LogWarn($"'{wname}' already exists."); return; }
+
+    string pwd = AskPassword("Password");
+    string pwd2 = AskPassword("Confirm password");
+    if (pwd != pwd2) { LogWarn("Passwords do not match."); return; }
+    if (pwd.Length < 4) { LogWarn("Password too short (min 4)."); return; }
+
+    var wallet = Wallet.Create(wname, pwd);
+    localWallets[wname] = wallet;
+
+    // Persist
+    var allWallets = localWallets.Values.ToList();
+    storage.SaveWallets(allWallets);
+
+    p2p.RegisterWallet(new PeerWalletInfo
+    {
+        Name = wname,
+        Address = wallet.Address,
+        PublicKey = wallet.PublicKey
+    });
+
+    LogOk($"Wallet '{wname}' created and saved.");
+    LogInfo($"  Address: {wallet.Address[..20]}…");
+    logger.Info("Wallet", $"Created '{wname}' addr={wallet.Address[..16]}…");
+}
+
+void HandleViewPeers()
+{
+    log.Clear();
+    LogHead("Known Peer Wallets");
+    LogDiv();
+    if (p2p.KnownWallets.Count == 0) { LogInfo("No peer wallets known yet."); return; }
+    foreach (var pw in p2p.KnownWallets.Values)
+        LogInfo($"  {pw.Name,-16}  {pw.Address[..20]}…");
+    LogLine();
+    LogInfo($"Total: {p2p.KnownWallets.Count} peer(s)");
+}
+
+void HandleSwitchWallet()
+{
+    log.Clear();
+    LogHead("Switch Active Wallet");
+    LogDiv();
+    var names = localWallets.Keys.ToList();
+    for (int i = 0; i < names.Count; i++)
+        LogInfo($"  [{i + 1}] {names[i]}" + (names[i] == device.Name ? "  ◀ active" : ""));
+    LogLine();
+    string raw = Ask("Pick number");
+    if (!int.TryParse(raw, out int idx) || idx < 1 || idx > names.Count)
+    { LogWarn("Invalid choice."); return; }
+
+    var candidate = localWallets[names[idx - 1]];
+    if (!candidate.IsUnlocked)
+    {
+        string pwd = AskPassword($"Password for '{candidate.Name}'");
+        if (!candidate.Unlock(pwd)) { LogWarn("Wrong password."); return; }
+    }
+    device = candidate;
+    LogOk($"Switched to wallet '{device.Name}'.");
+    logger.Info("Login", $"Switched active wallet to '{device.Name}'");
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+string ResolveAddress(string address)
+{
+    if (address == "COINBASE") return "COINBASE";
+    var local = localWallets.FirstOrDefault(w => w.Value.Address == address).Key;
+    if (local != null) return local;
+    var peer = p2p.KnownWallets.Values.FirstOrDefault(w => w.Address == address);
+    if (peer != null) return peer.Name;
+    return address.Length > 12 ? address[..12] + "…" : address;
+}
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+
+void PrintMenu(Wallet w, BlockChainService bc)
+{
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ╔══════════════════════════════════════════════╗");
+    Console.WriteLine($"  ║  ₿ BLOCKCHAIN NODE  ·  {w.Name,-20}║");
+    Console.WriteLine($"  ║  Port: {p2p.ListenPort,-5}  Blocks: {bc.Chain.Count,-5}  Diff: {bc.Difficulty,-5}    ║");
+    Console.WriteLine($"  ║  Mempool: {bc.PendingTransactions.Count}/{bc.MaxMempoolSize,-3}  Balance: {walletService.GetBalance(w.Address),-16}║");
+    Console.WriteLine("  ╠══════════════════════════════════════════════╣");
+    Console.ResetColor();
+    MenuItem("1", "View full blockchain");
+    MenuItem("2", "View block by index");
+    MenuItem("3", "Mine block(s)");
+    MenuItem("4", "View mempool");
+    MenuItem("5", "Send transaction");
+    MenuItem("6", "Wallet balances");
+    MenuItem("7", "Validate blockchain");
+    MenuItem("8", "Economy audit");
+    MenuItem("9", "Create wallet");
+    MenuItem("P", "Peer wallets");
+    MenuItem("S", "Switch active wallet");
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ╠══════════════════════════════════════════════╣");
+    Console.ResetColor();
+    MenuItem("0", "Exit");
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ╚══════════════════════════════════════════════╝");
+    Console.ResetColor();
+    Console.Write("  › ");
+}
+
+void MenuItem(string key, string label)
+{
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.Write("  ║  ");
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.Write($"[{key}]");
+    Console.ResetColor();
+    Console.Write($" {label}".PadRight(39));
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("║");
+    Console.ResetColor();
+}
+
+void Banner()
+{
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine();
+    Console.WriteLine("  ██████╗ ██╗      ██████╗  ██████╗██╗  ██╗");
+    Console.WriteLine("  ██╔══██╗██║     ██╔═══██╗██╔════╝██║ ██╔╝");
+    Console.WriteLine("  ██████╔╝██║     ██║   ██║██║     █████╔╝ ");
+    Console.WriteLine("  ██╔══██╗██║     ██║   ██║██║     ██╔═██╗ ");
+    Console.WriteLine("  ██████╔╝███████╗╚██████╔╝╚██████╗██║  ██╗");
+    Console.WriteLine("  ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝");
+    Console.ResetColor();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine("  Blockchain Node  ·  C#  ·  P2P  ·  ECDSA");
+    Console.WriteLine();
+    Console.ResetColor();
+}
+
+void Goodbye()
+{
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("\n  Node shutting down. Goodbye.\n");
+    Console.ResetColor();
+}

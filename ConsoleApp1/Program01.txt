@@ -1,0 +1,369 @@
+using BlockChain_01.Models;
+using BlockChain_01.Services;
+
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.CursorVisible = false;
+
+// ── Startup (runs once, before TUI loop) ─────────────────────────────────────
+
+Console.Clear();
+Banner();
+
+Console.Write("  Port [5000]: ");
+Console.CursorVisible = true;
+int port = int.TryParse(Console.ReadLine(), out int p) ? p : 5000;
+
+Console.Write("  Your name : ");
+string name = Console.ReadLine()?.Trim() is { Length: > 0 } n ? n : "Node";
+Console.CursorVisible = false;
+
+// ── Services ─────────────────────────────────────────────────────────────────
+
+var blockchain    = new BlockChainService();
+var display       = new BlockChainDisplayService(blockchain);
+var walletService = new WalletService(blockchain.Chain);
+var txService     = new TransactionService(blockchain);
+
+var device = walletService.CreateWallet(name);
+var wallets = new Dictionary<string, Wallet>(StringComparer.OrdinalIgnoreCase)
+{
+    [name]    = device,
+    ["Mark"]  = walletService.CreateWallet("Mark"),
+    ["Alice"] = walletService.CreateWallet("Alice"),
+};
+
+var p2p = new TCPP2PService(blockchain, port);
+p2p.Start();
+
+Console.Write("\n  Connect to peer port (blank to skip): ");
+Console.CursorVisible = true;
+string? peerInput = Console.ReadLine()?.Trim();
+Console.CursorVisible = false;
+if (int.TryParse(peerInput, out int peerPort) && peerPort != port)
+    await p2p.ConnectToPeerAsync("127.0.0.1", peerPort);
+
+// ── Log buffer (shown above menu, cleared each redraw) ───────────────────────
+
+var log = new List<(string text, ConsoleColor color)>();
+
+void Log(string text, ConsoleColor color = ConsoleColor.Gray) => log.Add((text, color));
+void LogOk(string text)   => Log("  + " + text, ConsoleColor.Green);
+void LogWarn(string text) => Log("  ! " + text, ConsoleColor.Yellow);
+void LogInfo(string text) => Log("  · " + text, ConsoleColor.DarkGray);
+void LogHead(string text) => Log("  " + text.ToUpper(), ConsoleColor.Cyan);
+void LogDiv()             => Log("  " + new string('─', 54), ConsoleColor.DarkGray);
+
+// ── TUI render ───────────────────────────────────────────────────────────────
+
+const int LOG_LINES = 14;
+const int MENU_LINES = 17; // lines PrintMenu draws
+
+void Render()
+{
+    Console.SetCursorPosition(0, 0);
+    Console.Clear(); // full clear so resizes don't leave artefacts
+
+    // ── log pane ─────────────────────────────────────────────────────────────
+    var visible = log.TakeLast(LOG_LINES).ToList();
+
+    // pad to fixed height so menu doesn't jump
+    for (int i = visible.Count; i < LOG_LINES; i++)
+        Console.WriteLine();
+
+    foreach (var (text, color) in visible)
+    {
+        Console.ForegroundColor = color;
+        // truncate to terminal width to avoid wrapping
+        int w = Math.Max(20, Console.WindowWidth - 1);
+        Console.WriteLine(text.Length > w ? text[..w] : text.PadRight(w));
+    }
+
+    Console.ResetColor();
+
+    // ── menu ─────────────────────────────────────────────────────────────────
+    PrintMenu();
+}
+
+void PrintMenu()
+{
+    decimal bal = blockchain.GetPendingBalance(device.Address);
+
+    C(ConsoleColor.DarkCyan);
+    W($"  +--[ {name} ]-----------------------------------------+");
+    W($"  |  blocks {blockchain.Chain.Count,-4}  mempool {blockchain.PendingTransactions.Count}/{blockchain.MaxMempoolSize}  diff {blockchain.Difficulty,-2}  minted {blockchain.TotalMinted,-7:F0}  |");
+    W($"  |  balance  {bal,-43:F4}|");
+    W("  +--[ MENU ]------------------------------------------+");
+    R();
+
+    MI("1", "view chain");   MI("2", "view block");   MI("3", "mine");
+    MI("4", "mempool");      MI("5", "send tx");      MI("6", "balances");
+    MI("7", "validate");     MI("8", "audit");         MI("9", "new wallet");
+
+    C(ConsoleColor.DarkCyan);
+    W("  |                                                    |");
+    W("  +--[ 0 exit ]----------------------------------------+");
+    R();
+    Console.Write("  > ");
+    Console.CursorVisible = true;
+}
+
+void MI(string k, string label)
+{
+    C(ConsoleColor.DarkCyan); Console.Write("  |  ");
+    C(ConsoleColor.Cyan);     Console.Write($"[{k}]");
+    R();                      Console.Write($" {label,-48}");
+    C(ConsoleColor.DarkCyan); Console.WriteLine("|");
+}
+
+void W(string s) { Console.WriteLine(s); }
+void C(ConsoleColor c) { Console.ForegroundColor = c; }
+void R() { Console.ResetColor(); }
+
+// ── Action helpers ────────────────────────────────────────────────────────────
+
+string Prompt(string label)
+{
+    // input happens below the menu — we need cursor visible
+    Console.CursorVisible = true;
+    Console.Write($"\n  {label}: ");
+    string? v = Console.ReadLine()?.Trim();
+    Console.CursorVisible = false;
+    return v ?? "";
+}
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
+
+void HandleViewChain()
+{
+    log.Clear();
+    LogHead("blockchain");
+    LogDiv();
+    foreach (var block in blockchain.Chain)
+    {
+        LogInfo($"#{block.Index}  hash={block.Hash[..10]}..  tx={block.Transactions.Count}  nonce={block.Nonce}  {block.MiningDuration:F2}s");
+    }
+    LogDiv();
+    LogInfo($"{blockchain.Chain.Count} blocks total");
+}
+
+void HandleViewBlock()
+{
+    string raw = Prompt("block index");
+    log.Clear();
+    if (!int.TryParse(raw, out int idx)) { LogWarn("Invalid index."); return; }
+    var b = blockchain.Chain.ElementAtOrDefault(idx);
+    if (b == null) { LogWarn($"Block #{idx} not found."); return; }
+    LogHead($"block #{b.Index}");
+    LogDiv();
+    LogInfo($"hash      {b.Hash}");
+    LogInfo($"prev      {b.PreviousHash}");
+    LogInfo($"diff      {b.Difficulty}   nonce  {b.Nonce}");
+    LogInfo($"mined in  {b.MiningDuration:F2}s   at  {b.TimeStamp:O}");
+    LogDiv();
+    if (b.Transactions.Count == 0) { LogInfo("[genesis block]"); return; }
+    foreach (var tx in b.Transactions)
+        LogInfo(tx.ToRawString().Length > 52 ? tx.ToRawString()[..52] + "…" : tx.ToRawString());
+}
+
+async Task HandleMine()
+{
+    string mode = Prompt("mode: [1] local  [2] network race");
+    string rawCount = Prompt("how many blocks");
+    log.Clear();
+    if (!int.TryParse(rawCount, out int count) || count < 1) { LogWarn("Invalid count."); return; }
+
+    if (mode == "1")
+    {
+        for (int i = 0; i < count; i++)
+        {
+            LogInfo($"Mining block {i + 1}/{count}...");
+            Render();
+            var block = await blockchain.MineBlockAsync(device.Address);
+            if (block != null)
+            {
+                p2p.BroadcastNewBlock(block);
+                LogOk($"Block #{block.Index} mined  hash={block.Hash[..10]}..  {block.MiningDuration:F2}s");
+            }
+        }
+    }
+    else if (mode == "2")
+    {
+        for (int i = 0; i < count; i++)
+        {
+            using var cts = new CancellationTokenSource();
+            int delay = Random.Shared.Next(2000, 8000);
+            LogInfo($"Race started — peer ETA ~{delay / 1000}s");
+            Render();
+
+            _ = Task.Delay(delay).ContinueWith(_ =>
+            {
+                if (!cts.IsCancellationRequested)
+                {
+                    LogWarn("Peer won the race.");
+                    cts.Cancel();
+                }
+            });
+
+            var mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
+            if (mined != null)
+            {
+                LogOk($"You won! Block #{mined.Index}  {mined.MiningDuration:F2}s");
+                p2p.BroadcastNewBlock(mined);
+                cts.Cancel();
+            }
+        }
+    }
+    else { LogWarn("Invalid mode."); }
+}
+
+void HandleMempool()
+{
+    log.Clear();
+    LogHead("mempool");
+    LogDiv();
+    if (blockchain.PendingTransactions.Count == 0) { LogInfo("(empty)"); return; }
+    LogInfo($"{"from",-12}  {"to",-12}  {"amount",8}  {"fee",6}");
+    LogDiv();
+    foreach (var tx in blockchain.PendingTransactions.OrderByDescending(t => t.Fee))
+    {
+        string from = wallets.FirstOrDefault(w => w.Value.Address == tx.From).Key
+                      ?? tx.From[..Math.Min(10, tx.From.Length)] + "…";
+        string to   = wallets.FirstOrDefault(w => w.Value.Address == tx.To).Key
+                      ?? tx.To[..Math.Min(10, tx.To.Length)] + "…";
+        LogInfo($"{from,-12}  {to,-12}  {tx.Amount,8:F4}  {tx.Fee,6:F4}");
+    }
+    LogInfo($"{blockchain.PendingTransactions.Count}/{blockchain.MaxMempoolSize} slots used");
+}
+
+async Task HandleSendTx()
+{
+    string from   = Prompt("from (wallet name)");
+    string to     = Prompt("to   (wallet name)");
+    string rawAmt = Prompt("amount");
+    string rawFee = Prompt("fee");
+    log.Clear();
+
+    if (!wallets.TryGetValue(from, out var sender))   { LogWarn($"Wallet '{from}' not found."); return; }
+    if (!wallets.TryGetValue(to,   out var receiver)) { LogWarn($"Wallet '{to}' not found.");   return; }
+    if (!decimal.TryParse(rawAmt, out decimal amt))   { LogWarn("Invalid amount."); return; }
+    if (!decimal.TryParse(rawFee, out decimal fee))   { LogWarn("Invalid fee.");    return; }
+
+    try
+    {
+        var tx = txService.CreateTransaction(sender, receiver.Address, amt, sender.PublicKey);
+        if (tx == null) { LogWarn("Transaction creation failed."); return; }
+        tx.Fee = fee;
+        tx.Signature = sender.Sign(tx.GetDataToSign());
+        blockchain.AddTransactionToMempool(tx);
+        LogOk($"TX added to mempool  ({from} → {to}  {amt:F4})");
+        LogInfo($"pending balance: {blockchain.GetPendingBalance(sender.Address):F4}");
+    }
+    catch (Exception ex) { LogWarn(ex.Message); }
+}
+
+void HandleBalances()
+{
+    log.Clear();
+    LogHead("balances");
+    LogDiv();
+    LogInfo($"{"name",-14}  {"confirmed",12}  {"pending",12}");
+    LogDiv();
+    foreach (var (n, w) in wallets)
+    {
+        decimal conf = walletService.GetBalance(w.Address);
+        decimal pend = blockchain.GetPendingBalance(w.Address);
+        LogInfo($"{n,-14}  {conf,12:F4}  {pend,12:F4}");
+    }
+}
+
+void HandleValidate()
+{
+    log.Clear();
+    LogHead("validation");
+    LogDiv();
+    bool valid = blockchain.IsValid();
+    if (valid)
+        LogOk("Blockchain is valid.");
+    else
+    {
+        LogWarn("Integrity compromised!");
+        int bad = blockchain.GetInvalidBlockIndex();
+        if (bad >= 0) LogWarn($"First invalid block: #{bad}");
+    }
+}
+
+void HandleAudit()
+{
+    log.Clear();
+    LogHead("economy audit");
+    LogDiv();
+    bool ok = blockchain.ValidateEconomy();
+    if (ok) LogOk("Economy consistent. Proof of Reserves passed.");
+    else    LogWarn("Mismatch! Possible double-spend or minting error.");
+}
+
+void HandleNewWallet()
+{
+    string wname = Prompt("wallet name");
+    log.Clear();
+    if (string.IsNullOrEmpty(wname))       { LogWarn("Name cannot be empty."); return; }
+    if (wallets.ContainsKey(wname))        { LogWarn($"'{wname}' already exists."); return; }
+    var w = walletService.CreateWallet(wname);
+    wallets[wname] = w;
+    LogOk($"Wallet '{wname}' created.");
+    LogInfo($"address: {w.Address[..24]}…");
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+
+string? choice;
+do
+{
+    Render();
+    choice = Console.ReadLine()?.Trim();
+    Console.CursorVisible = false;
+
+    switch (choice)
+    {
+        case "1": HandleViewChain();       break;
+        case "2": HandleViewBlock();       break;
+        case "3": await HandleMine();      break;
+        case "4": HandleMempool();         break;
+        case "5": await HandleSendTx();    break;
+        case "6": HandleBalances();        break;
+        case "7": HandleValidate();        break;
+        case "8": HandleAudit();           break;
+        case "9": HandleNewWallet();       break;
+        case "0": break;
+        default:
+            if (choice != null)
+                LogWarn($"Unknown option '{choice}'.");
+            break;
+    }
+}
+while (choice != "0");
+
+Console.Clear();
+Console.CursorVisible = true;
+C(ConsoleColor.DarkCyan);
+Banner();
+W("  Node stopped. Goodbye.\n");
+R();
+
+// ── Banner ────────────────────────────────────────────────────────────────────
+
+void Banner()
+{
+    C(ConsoleColor.Cyan);
+    W("");
+    W("  +-----------------------------------------------+");
+    W("  |   ___  _         _      ___ _         _       |");
+    W("  |  | _ )| | ___  __| |_  / __| |_  __ _(_)_ _  |");
+    W("  |  | _ \\| |/ _ \\/ _| ' \\ \\__ \\ ' \\/ _` | | ' \\ |");
+    W("  |  |___/|_|\\___/\\__|_||_||___/_||_\\__,_|_|_||_||");
+    W("  |                                               |");
+    W("  |      C#  .  P2P  .  ECDSA  .  SHA-256        |");
+    W("  +-----------------------------------------------+");
+    W("");
+    R();
+}
