@@ -16,6 +16,7 @@ namespace BlockChain_01.Services
         public readonly TcpListener _listener;
         private readonly ConcurrentBag<TcpClient> _clients = new ConcurrentBag<TcpClient>();
         private readonly BlockChainService _blockChainService;
+        private readonly HashingService _hashingService = new HashingService();
 
         public TCPP2PService(BlockChainService blockChainService, int port)
         {
@@ -53,7 +54,7 @@ namespace BlockChain_01.Services
                 var client = _listener.AcceptTcpClient();
                 _clients.Add(client);
                 Console.WriteLine($"New client connected: {client.Client.RemoteEndPoint}");
-                Task.Run(()=>HandleClientAsync(client));
+                Task.Run(() => HandleClientAsync(client));
             }
         }
 
@@ -94,6 +95,18 @@ namespace BlockChain_01.Services
                     var newBlock = JsonSerializer.Deserialize<Models.Block>(message.Data);
                     if (newBlock == null) return;
                     var lastBlock = _blockChainService.Chain.Last();
+                    string recalculatedHash = _hashingService.ComputeHash(newBlock);
+                    bool hashMatches = recalculatedHash == newBlock.Hash;
+                    bool meetsDifficulty = newBlock.Hash.StartsWith(new string('0', _blockChainService.Difficulty));
+
+                    if (!hashMatches || !meetsDifficulty)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("[SECURITY] 🚨 Attention! Corrupted block has been found. Deleting...");
+                        Console.ResetColor();
+                        break;
+                    }
+
                     if (newBlock.Index == lastBlock.Index + 1 && newBlock.PreviousHash == lastBlock.Hash)
                     {
                         _blockChainService.Chain.Add(newBlock);
