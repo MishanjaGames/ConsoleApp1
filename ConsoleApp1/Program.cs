@@ -41,7 +41,7 @@ p2pService.Start();
 
 Console.WriteLine($"Input port and address to connect");
 var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
-if (portToConnect!=null)
+if (portToConnect != null)
 {
     Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
     await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
@@ -52,7 +52,7 @@ string? choice;
 do
 {
     Console.WriteLine(new string('=', 50));
-    Console.WriteLine($"|| {device.Name}:{blockchain.GetPendingBalance(device.Address)} ||");
+    Console.WriteLine($"|| {device.Name}:{walletService.GetBalance(device.Address)} ||");
     Console.WriteLine(new string('=', 50));
     Console.WriteLine("1: Display Blockchain");
     Console.WriteLine("2: Add Block");
@@ -64,6 +64,7 @@ do
     Console.WriteLine("8: Vanity Mining Demo");
     Console.WriteLine("9: Smart Chunking + Address Validation Demo");
     Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
+    Console.WriteLine("11: Merkle Tree Demo (Merkle Root / Proof / CVE-2012-2459)");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -118,7 +119,7 @@ do
 
                     var mined = await blockchain.MineBlockAsync(device.Address, cts.Token);
 
-                    if (mined!=null)
+                    if (mined != null)
                     {
                         Console.WriteLine("[Network] Block generated. Adding it.");
                         p2pService.BroadcastNewBlock(mined);
@@ -213,6 +214,9 @@ do
         case "10":
             //await RunEconomyAudit();
             break;
+        case "11":
+            RunMerkleTreeDemo();
+            break;
         default:
             if (choice != "0")
                 Console.WriteLine("Incorrect. Try again.");
@@ -220,6 +224,50 @@ do
     }
 }
 while (choice != "0");
+
+void RunMerkleTreeDemo()
+{
+    var hs = new HashingService();
+
+    Console.WriteLine("=== Tasks 1-2: 5 transaction block, display of Merkle Root ===");
+    var txs = new List<Transaction>();
+    for (int i = 0; i < 10; i++)
+        txs.Add(new Transaction($"Addr{i}A", $"Addr{i}B", 1 + i, new byte[0]));
+
+    string root = hs.GetMerkleRoot(txs);
+    Console.WriteLine($"Merkle Root: {root}");
+
+    Console.WriteLine("\n=== Tasks 3-4: Merkle Proof for 3-rd transaction ===");
+    var target = txs[5];
+    var proof = hs.GetMerkleProof(txs, target.Id);
+    foreach (var (h, isLeft) in proof)
+        Console.WriteLine($"  Neighbor: {h[..12]}... | IsLeft={isLeft}");
+
+    Console.WriteLine("\n=== Task 5: Proof check ===");
+    string targetHash = hs.ComputeHash_P(target.ToRawString());
+    bool valid = hs.VerifyMerkleProof(targetHash, root, proof);
+    Console.WriteLine($"VerifyMerkleProof (validation): {valid}");
+
+    Console.WriteLine("\n=== Task 6: Outside corruption (corrupted validation) ===");
+    var tamperedProof = new List<(string Hash, bool IsLeft)>(proof);
+    var (badHash, badIsLeft) = tamperedProof[0];
+    tamperedProof[0] = (badHash.Remove(0, 1).Insert(0, badHash[0] == 'A' ? "B" : "A"), badIsLeft);
+    bool tamperedValid = hs.VerifyMerkleProof(targetHash, root, tamperedProof);
+    Console.WriteLine($"VerifyMerkleProof (corrupted validation): {tamperedValid}");
+
+    Console.WriteLine("\n=== Крок 7: CVE-2012-2459 Attack (transaction duplication) ===");
+    var attackTxs = new List<Transaction>(txs.Take(3));
+    attackTxs.Add(attackTxs[2]); // dumb duplication
+    try
+    {
+        hs.GetMerkleRoot(attackTxs);
+        Console.WriteLine("ATTENTION: Attack has succeded!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Attack failed: {ex.Message}");
+    }
+}
 
 //Console.WriteLine(new string('=', 20));
 //blockchain.Chain[1].Data = "Bob -> ???: 99999999999";
