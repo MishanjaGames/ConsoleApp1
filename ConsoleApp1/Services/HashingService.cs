@@ -39,9 +39,9 @@ namespace BlockChain_01.Services
             foreach (var transaction in transactions)
                 currentLayer.Add(ComputeHash(transaction.ToRawString()));
 
-            int level = 0;
-            string levelName = currentLayer.Count == 1 ? "Root" : "Branch";
-            Console.WriteLine($"Level {level} ({levelName}): {currentLayer.Count} hash");
+            //int level = 0;
+            //string levelName = currentLayer.Count == 1 ? "Root" : "Branch";
+            //Console.WriteLine($"Level {level} ({levelName}): {currentLayer.Count} hash");
 
             while (currentLayer.Count > 1)
             {
@@ -52,10 +52,10 @@ namespace BlockChain_01.Services
                     string right = (i + 1 < currentLayer.Count) ? currentLayer[i + 1] : left;
                     nextLayer.Add(ComputeHash(left + right));
                 }
-                level++;
                 currentLayer = nextLayer;
-                levelName = currentLayer.Count == 1 ? "Root" : "Branch";
-                Console.WriteLine($"Level {level} ({levelName}): {currentLayer.Count} hash");
+                //level++;
+                //levelName = currentLayer.Count == 1 ? "Root" : "Branch";
+                //Console.WriteLine($"Level {level} ({levelName}): {currentLayer.Count} hash");
             }
 
             return currentLayer[0];

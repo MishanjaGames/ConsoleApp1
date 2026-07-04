@@ -27,14 +27,26 @@ Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}")
 
 var w_Mark = walletService.CreateWallet("Mark");
 var w_Alice = walletService.CreateWallet("Alice");
-var device = walletService.CreateWallet(name);
+var device = new Wallet();
+var testdevice = new Wallet();
+if (name == "user") {
+    device = walletService.CreateWallet(name);
+    testdevice = walletService.CreateWallet(name+1);
+}
+else if (name == "user1")
+{
+    device = walletService.CreateWallet(name);
+    testdevice = walletService.CreateWallet("user");
+}
 users.Add(w_Mark);
 users.Add(w_Alice);
 users.Add(device);
+users.Add(testdevice);
 walletRegistry["Mark"] = w_Mark;
 walletRegistry["Alice"] = w_Alice;
 walletRegistry[systemWallet.Name] = systemWallet;
 walletRegistry[device.Name] = device;
+walletRegistry[testdevice.Name] = testdevice;
 
 var p2pService = new TCPP2PService(blockchain, port);
 p2pService.Start();
@@ -65,6 +77,7 @@ do
     Console.WriteLine("9: Smart Chunking + Address Validation Demo");
     Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
     Console.WriteLine("11: Merkle Tree Demo (Merkle Root / Proof / CVE-2012-2459)");
+    Console.WriteLine("12: [Attack]: Block spoof");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -215,7 +228,18 @@ do
             //await RunEconomyAudit();
             break;
         case "11":
-            RunMerkleTreeDemo();
+            //RunMerkleTreeDemo();
+            break;
+        case "12":
+            var attackBlock = blockchain.Chain.Last();
+            if (attackBlock.Transactions.Count == 0) { Console.WriteLine("Transactions hasnt been found."); break; }
+            var attackjson = System.Text.Json.JsonSerializer.Serialize(attackBlock);
+            var tamperedBlock = System.Text.Json.JsonSerializer.Deserialize<Block>(attackjson)!;
+            tamperedBlock.Transactions[0].Amount = 999999;
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[Block spoof Attack] Sending tempered block #{tamperedBlock.Index} : (Amount changed to 999999)...");
+            Console.ResetColor();
+            p2pService.BroadcastNewBlock(tamperedBlock);
             break;
         default:
             if (choice != "0")
@@ -225,49 +249,42 @@ do
 }
 while (choice != "0");
 
-void RunMerkleTreeDemo()
-{
-    var hs = new HashingService();
+//void RunMerkleTreeDemo()
+//{
+//    var hs = new HashingService();
 
-    Console.WriteLine("=== Tasks 1-2: 5 transaction block, display of Merkle Root ===");
-    var txs = new List<Transaction>();
-    for (int i = 0; i < 10; i++)
-        txs.Add(new Transaction($"Addr{i}A", $"Addr{i}B", 1 + i, new byte[0]));
+//    Console.WriteLine("=== Tasks 2: display of Merkle Root ===");
+//    var txs = new List<Transaction>();
+//    for (int i = 0; i < 10; i++)
+//        txs.Add(new Transaction($"Addr{i}A", $"Addr{i}B", 1 + i, new byte[0]));
 
-    string root = hs.GetMerkleRoot(txs);
-    Console.WriteLine($"Merkle Root: {root}");
+//    string root = hs.GetMerkleRoot(txs);
+//    Console.WriteLine($"Merkle Root: {root}");
 
-    Console.WriteLine("\n=== Tasks 3-4: Merkle Proof for 3-rd transaction ===");
-    var target = txs[5];
-    var proof = hs.GetMerkleProof(txs, target.Id);
-    foreach (var (h, isLeft) in proof)
-        Console.WriteLine($"  Neighbor: {h[..12]}... | IsLeft={isLeft}");
+//    Console.WriteLine("\n=== Tasks 3: Merkle Proof for Node ===");
+//    var target = txs[5];
+//    var proof = hs.GetMerkleProof(txs, target.Id);
+//    foreach (var (h, isLeft) in proof)
+//        Console.WriteLine($"  Neighbor: {h[..12]}... | IsLeft={isLeft}");
 
-    Console.WriteLine("\n=== Task 5: Proof check ===");
-    string targetHash = hs.ComputeHash_P(target.ToRawString());
-    bool valid = hs.VerifyMerkleProof(targetHash, root, proof);
-    Console.WriteLine($"VerifyMerkleProof (validation): {valid}");
+//    Console.WriteLine("\n=== Task 3: Proof check for client ===");
+//    string targetHash = hs.ComputeHash_P(target.ToRawString());
+//    bool valid = hs.VerifyMerkleProof(targetHash, root, proof);
+//    Console.WriteLine($"VerifyMerkleProof (validation): {valid}");
 
-    Console.WriteLine("\n=== Task 6: Outside corruption (corrupted validation) ===");
-    var tamperedProof = new List<(string Hash, bool IsLeft)>(proof);
-    var (badHash, badIsLeft) = tamperedProof[0];
-    tamperedProof[0] = (badHash.Remove(0, 1).Insert(0, badHash[0] == 'A' ? "B" : "A"), badIsLeft);
-    bool tamperedValid = hs.VerifyMerkleProof(targetHash, root, tamperedProof);
-    Console.WriteLine($"VerifyMerkleProof (corrupted validation): {tamperedValid}");
-
-    Console.WriteLine("\n=== Крок 7: CVE-2012-2459 Attack (transaction duplication) ===");
-    var attackTxs = new List<Transaction>(txs.Take(3));
-    attackTxs.Add(attackTxs[2]); // dumb duplication
-    try
-    {
-        hs.GetMerkleRoot(attackTxs);
-        Console.WriteLine("ATTENTION: Attack has succeded!");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Attack failed: {ex.Message}");
-    }
-}
+//    Console.WriteLine("\n=== Task 4: CVE-2012-2459 Attack (transaction duplication) ===");
+//    var attackTxs = new List<Transaction>(txs.Take(3));
+//    attackTxs.Add(attackTxs[2]); // dumb duplication
+//    try
+//    {
+//        hs.GetMerkleRoot(attackTxs);
+//        Console.WriteLine("ATTENTION: Attack has succeded!");
+//    }
+//    catch (Exception ex)
+//    {
+//        Console.WriteLine($"Attack failed: {ex.Message}");
+//    }
+//}
 
 //Console.WriteLine(new string('=', 20));
 //blockchain.Chain[1].Data = "Bob -> ???: 99999999999";
