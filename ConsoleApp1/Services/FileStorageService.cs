@@ -10,7 +10,7 @@ namespace BlockChain_01.Services
 {
     public class FileStorageService
     {
-        private readonly string _blockchainFilePath = "blockchain_data.json";
+        private readonly string _blockchainFilePath = "bchain_dat.json";
         private readonly string _walletsFilePath = "wallets_data.json";
 
         private readonly JsonSerializerOptions jsonSerializerOptions = new JsonSerializerOptions()
@@ -18,8 +18,20 @@ namespace BlockChain_01.Services
             WriteIndented = true
         };
 
-        private readonly string _backupFilePath = "blockchain_backup.json";
-        private readonly string _corruptedFilePath = "blockchain_corrupted.json";
+        private readonly string _backupFilePath = "bchain_backup.json";
+        private readonly string _corruptedFilePath = "bchain_corrupted.json";
+
+        private string username {  get; set; }
+        private int port { get; set; }
+
+        public FileStorageService(string username, int port)
+        {
+            this.username = username;
+            this.port = port;
+            _blockchainFilePath = $"bchain_{username}_{port}.json";
+            _walletsFilePath = $"wallets_{username}_{port}.json";
+            _backupFilePath = $"blockchain_backup_{username}_{port}.json";
+        }
 
         public void SaveBlockchain(List<Block> blockchain)
         {

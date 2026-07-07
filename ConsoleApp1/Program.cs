@@ -10,7 +10,7 @@ var name = Console.ReadLine();
 
 
 
-var blockchain = new BlockChainService();
+var blockchain = new BlockChainService(name, port);
 var display = new BlockChainDisplayService(blockchain);
 var walletService = new WalletService(blockchain.Chain);
 var systemWallet = new WalletService(blockchain.Chain).CreateWallet("COINBASE");
@@ -51,14 +51,6 @@ walletRegistry[testdevice.Name] = testdevice;
 var p2pService = new TCPP2PService(blockchain, port);
 p2pService.Start();
 
-Console.WriteLine($"Input port and address to connect");
-var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
-if (portToConnect != null)
-{
-    Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
-    await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
-}
-
 string? choice;
 
 do
@@ -72,12 +64,7 @@ do
     Console.WriteLine("4: View Banace");
     Console.WriteLine("5: Validate BlockChain");
     Console.WriteLine("6: Get Block by Index");
-    Console.WriteLine("7: Initiate testing");
-    Console.WriteLine("8: Vanity Mining Demo");
-    Console.WriteLine("9: Smart Chunking + Address Validation Demo");
-    Console.WriteLine("10: Economy Audit (Double Spend + Hard Cap + Proof of Reserves)");
-    Console.WriteLine("11: Merkle Tree Demo (Merkle Root / Proof / CVE-2012-2459)");
-    Console.WriteLine("12: [Attack]: Block spoof");
+    Console.WriteLine("7: Connect to other");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -214,33 +201,39 @@ do
                 display.PrintBlock(null, null, idx - 1);
             break;
         case "7":
-            //await RunMempoolDemo();
+            Console.WriteLine($"Input port and address to connect");
+            var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
+            if (portToConnect != null)
+            {
+                Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
+                await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
+            }
             break;
-        case "8":
-            Console.WriteLine("FIX THIS.");
-            //await TestVanityMining();
-            break;
-        case "9":
-            Console.WriteLine("FIX THIS.");
-            //RunSmartChunkingDemo();
-            break;
-        case "10":
-            //await RunEconomyAudit();
-            break;
-        case "11":
-            //RunMerkleTreeDemo();
-            break;
-        case "12":
-            var attackBlock = blockchain.Chain.Last();
-            if (attackBlock.Transactions.Count == 0) { Console.WriteLine("Transactions hasnt been found."); break; }
-            var attackjson = System.Text.Json.JsonSerializer.Serialize(attackBlock);
-            var tamperedBlock = System.Text.Json.JsonSerializer.Deserialize<Block>(attackjson)!;
-            tamperedBlock.Transactions[0].Amount = 999999;
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[Block spoof Attack] Sending tempered block #{tamperedBlock.Index} : (Amount changed to 999999)...");
-            Console.ResetColor();
-            p2pService.BroadcastNewBlock(tamperedBlock);
-            break;
+        //case "8":
+        //    Console.WriteLine("FIX THIS.");
+        //    //await TestVanityMining();
+        //    break;
+        //case "9":
+        //    Console.WriteLine("FIX THIS.");
+        //    //RunSmartChunkingDemo();
+        //    break;
+        //case "10":
+        //    //await RunEconomyAudit();
+        //    break;
+        //case "11":
+        //    //RunMerkleTreeDemo();
+        //    break;
+        //case "12":
+        //    var attackBlock = blockchain.Chain.Last();
+        //    if (attackBlock.Transactions.Count == 0) { Console.WriteLine("Transactions hasnt been found."); break; }
+        //    var attackjson = System.Text.Json.JsonSerializer.Serialize(attackBlock);
+        //    var tamperedBlock = System.Text.Json.JsonSerializer.Deserialize<Block>(attackjson)!;
+        //    tamperedBlock.Transactions[0].Amount = 999999;
+        //    Console.ForegroundColor = ConsoleColor.Yellow;
+        //    Console.WriteLine($"[Block spoof Attack] Sending tempered block #{tamperedBlock.Index} : (Amount changed to 999999)...");
+        //    Console.ResetColor();
+        //    p2pService.BroadcastNewBlock(tamperedBlock);
+        //    break;
         default:
             if (choice != "0")
                 Console.WriteLine("Incorrect. Try again.");

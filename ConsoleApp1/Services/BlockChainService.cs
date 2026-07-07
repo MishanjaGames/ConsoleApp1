@@ -23,10 +23,10 @@ namespace BlockChain_01.Services
         private readonly decimal _miningReward = 50m;
         private readonly decimal maxTransactionAmount = 2m;
         private readonly int howingInterval = 5;
-        public BlockChainService(double targetBlockTime = 5)
+        public BlockChainService(string uname, int p, double targetBlockTime = 5)
         {
             Chain = new List<Block>();
-            _storageService = new FileStorageService();
+            _storageService = new FileStorageService(uname,p);
             _targetBlockTime = targetBlockTime;
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
@@ -64,7 +64,7 @@ namespace BlockChain_01.Services
 
         private void CreateGenesisBlock()
         {
-            var genesisBlock = new Block(0, DateTime.Parse("01.01.1990"), new List<Transaction>(), "0", Difficulty);
+            var genesisBlock = new Block(0, DateTime.UtcNow, new List<Transaction>(), "0", Difficulty);
             _miningService.MineBlock(genesisBlock, Difficulty);
             Chain.Add(genesisBlock);
             _storageService.SaveBlockchain(Chain);
@@ -360,6 +360,49 @@ namespace BlockChain_01.Services
         {
             int halvingCount = (Chain.Count - 1) / howingInterval;
             return _miningReward / (decimal)Math.Pow(2, halvingCount);
+        }
+
+        public double GetChainWeight(List<Block> incomeChain)
+        {
+            double weight = 0;
+            foreach (var block in incomeChain)
+            {
+                weight += Math.Pow(2, block.Difficulty);
+            }
+            return weight;
+        }
+
+        public bool IsChainValid(List<Block> externalChain)
+        {
+            for (int i = 1; i < externalChain.Count; i++)
+            {
+                Block curr = externalChain[i];
+                Block prev = externalChain[i - 1];
+                if (curr.Hash != _hashingService.ComputeHash(curr) || curr.PreviousHash != prev.Hash) return false;
+            }
+            double currweight = GetChainWeight(Chain);
+            double externalweight = GetChainWeight(externalChain);
+            return externalweight > currweight;
+        }
+
+        public bool ResolveConflicts(List<Block> externalChain)
+        {
+            if (IsChainValid(externalChain))
+            {
+                var currWork = GetChainWeight(Chain);
+                var extWork = GetChainWeight(externalChain);
+
+                if (extWork <= currWork)
+                {
+                    Console.WriteLine("[Blockchain] Received chain is not heavier. Ignoring.");
+                    return false;
+                }
+
+                Chain = externalChain;
+                _storageService.SaveBlockchain(Chain);
+                return true;
+            }
+            return false;
         }
     }
 }
