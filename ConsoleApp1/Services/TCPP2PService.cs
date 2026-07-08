@@ -28,7 +28,7 @@ namespace BlockChain_01.Services
         {
             _listener.Start();
             Console.WriteLine($"P2P service started on port {_listener.LocalEndpoint}");
-            Task.Run(async () => AcceptClientAsync());
+            _ = Task.Run(async () => await AcceptClientAsync());
         }
 
         public async Task ConnectToPeerAsync(string ipAddress, int port)
@@ -40,7 +40,7 @@ namespace BlockChain_01.Services
                 _clients.Add(client);
                 Console.WriteLine($"Connected to peer: {ipAddress}:{port}");
                 BroadcastSync();
-                Task.Run(() => HandleClientAsync(client));
+                _ = Task.Run(async () => await HandleClientAsync(client));
             }
             catch (Exception ex)
             {
@@ -55,7 +55,7 @@ namespace BlockChain_01.Services
                 var client = _listener.AcceptTcpClient();
                 _clients.Add(client);
                 Console.WriteLine($"New client connected: {client.Client.RemoteEndPoint}");
-                Task.Run(() => HandleClientAsync(client));
+                _ = Task.Run(async () => await HandleClientAsync(client));
             }
         }
 

@@ -6,14 +6,14 @@ using System.Text;
 Console.WriteLine("Awaiting port:");
 var port = int.Parse(Console.ReadLine() ?? "5000");
 Console.WriteLine("Input username");
-var name = Console.ReadLine();
+var name = Console.ReadLine() ?? string.Empty;
 
 
 
-var blockchain = new BlockChainService(name, port);
+var blockchain = new BlockChainService(name, port, targetBlockTime: 20);
 var display = new BlockChainDisplayService(blockchain);
-var walletService = new WalletService(blockchain.Chain);
-var systemWallet = new WalletService(blockchain.Chain).CreateWallet("COINBASE");
+var walletService = new WalletService(() => blockchain.Chain);
+var systemWallet = new WalletService(() => blockchain.Chain).CreateWallet("COINBASE");
 var transactionService = new TransactionService(blockchain);
 
 var users = new List<Wallet>();
@@ -23,7 +23,7 @@ var walletRegistry = new Dictionary<string, Wallet>();
 Console.WriteLine("Blockchain initiated :)");
 
 Console.WriteLine($"Total cores count: {Environment.ProcessorCount}");
-Console.WriteLine($"Total cores in use count: {Environment.ProcessorCount / 2}");
+Console.WriteLine($"Total cores in use count: {(Environment.ProcessorCount / 4) * 3}");
 
 var w_Mark = walletService.CreateWallet("Mark");
 var w_Alice = walletService.CreateWallet("Alice");
@@ -51,6 +51,8 @@ walletRegistry[testdevice.Name] = testdevice;
 var p2pService = new TCPP2PService(blockchain, port);
 p2pService.Start();
 
+await RunTokenizationExamDemoAsync(blockchain, transactionService, walletService, p2pService, walletRegistry);
+
 string? choice;
 
 do
@@ -65,6 +67,9 @@ do
     Console.WriteLine("5: Validate BlockChain");
     Console.WriteLine("6: Get Block by Index");
     Console.WriteLine("7: Connect to other");
+    Console.WriteLine("8: Tokenization demo");
+    Console.WriteLine("10: Market");
+    Console.WriteLine("9: Consesus demo");
     Console.WriteLine("0: Exit");
     Console.WriteLine(new string('-', 50));
     choice = Console.ReadLine();
@@ -93,7 +98,9 @@ do
 
                 for (int i = 0; i < c; i++)
                 {
-                    p2pService.BroadcastNewBlock(await blockchain.MineBlockAsync(device.Address));
+                    var mined = await blockchain.MineBlockAsync(device.Address);
+                    if (mined != null)
+                        p2pService.BroadcastNewBlock(mined);
                 }
             }
             else if (select == "2")
@@ -203,16 +210,18 @@ do
         case "7":
             Console.WriteLine($"Input port and address to connect");
             var portToConnect = int.Parse(Console.ReadLine() ?? "5000");
-            if (portToConnect != null)
-            {
-                Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
-                await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
-            }
+            Console.WriteLine($"Connecting to 127.0.0.1:{portToConnect}...");
+            await p2pService.ConnectToPeerAsync("127.0.0.1", portToConnect);
             break;
-        //case "8":
-        //    Console.WriteLine("FIX THIS.");
-        //    //await TestVanityMining();
-        //    break;
+        case "8":
+            await RunTokenizationExamDemoAsync(blockchain, transactionService, walletService, p2pService, walletRegistry);
+            break;
+        case "10":
+            await RunMarketMenuAsync(blockchain, transactionService, walletService, walletRegistry);
+            break;
+        case "9":
+            await RunForkConsensusDemoAsync();
+            break;
         //case "9":
         //    Console.WriteLine("FIX THIS.");
         //    //RunSmartChunkingDemo();
@@ -241,6 +250,216 @@ do
     }
 }
 while (choice != "0");
+
+async Task MineAndBroadcastAsync(BlockChainService blockchain, TCPP2PService p2pService, string minerAddress)
+{
+    var minedBlock = await blockchain.MineBlockAsync(minerAddress);
+    if (minedBlock != null)
+    {
+        p2pService.BroadcastNewBlock(minedBlock);
+    }
+}
+
+async Task RunTokenizationExamDemoAsync(BlockChainService blockchain, TransactionService transactionService, WalletService walletService, TCPP2PService p2pService, Dictionary<string, Wallet> walletRegistry)
+{
+    Console.WriteLine("\n=== Exam demo: tokenization and smart-style transactions ===");
+
+    var aliceWallet = walletRegistry["Alice"];
+    if (!walletRegistry.ContainsKey("Bob"))
+    {
+        walletRegistry["Bob"] = walletService.CreateWallet("Bob");
+    }
+    var bobWallet = walletRegistry["Bob"];
+
+    Console.WriteLine("1) Alice mines blocks until she can pay the ICO tax in BASE...");
+    int attempts = 0;
+    while (walletService.GetBalance(aliceWallet.Address, "BASE") < TransactionService.IcoTax && attempts < 10)
+    {
+        attempts++;
+        await MineAndBroadcastAsync(blockchain, p2pService, aliceWallet.Address);
+        Console.WriteLine($"Alice BASE balance after mining attempt {attempts}: {walletService.GetBalance(aliceWallet.Address, "BASE")}");
+    }
+
+    var aliceBaseBalance = walletService.GetBalance(aliceWallet.Address, "BASE");
+    Console.WriteLine($"Alice BASE balance before ICO: {aliceBaseBalance}");
+
+    Console.WriteLine("2) Alice issues 1000 ALICE_COIN with the required ICO tax...");
+    try
+    {
+        var aliceIssue = transactionService.CreateIssueTransaction(aliceWallet, "ALICE_COIN", 1000m, aliceWallet.PublicKey);
+        if (aliceIssue == null)
+        {
+            Console.WriteLine("Alice ICO was rejected unexpectedly.");
+            return;
+        }
+
+        blockchain.AddTransactionToMempool(aliceIssue);
+        await MineAndBroadcastAsync(blockchain, p2pService, aliceWallet.Address);
+        Console.WriteLine("Alice ICO transaction was accepted and mined.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Alice ICO failed: {ex.Message}");
+        return;
+    }
+
+    Console.WriteLine("3) Bob tries to issue BOB_COIN while being poor (expected rejection)...");
+    var bobPoorIssue = transactionService.CreateIssueTransaction(bobWallet, "BOB_COIN", 500m, bobWallet.PublicKey);
+    if (bobPoorIssue == null)
+    {
+        Console.WriteLine("Bob's poor ICO was rejected as expected.");
+    }
+    else
+    {
+        Console.WriteLine("Bob's poor ICO unexpectedly passed.");
+    }
+
+    Console.WriteLine("4) Bob tries to steal the ALICE_COIN ticker (expected rejection)...");
+    var bobDuplicateIssue = transactionService.CreateIssueTransaction(bobWallet, "ALICE_COIN", 500m, bobWallet.PublicKey);
+    if (bobDuplicateIssue == null)
+    {
+        Console.WriteLine("Bob's duplicate ticker ICO was rejected as expected.");
+    }
+    else
+    {
+        Console.WriteLine("Bob's duplicate ticker ICO unexpectedly passed.");
+    }
+
+    Console.WriteLine("5) Alice transfers part of her new token to Bob...");
+    var transferTx = transactionService.CreateTransaction(aliceWallet, bobWallet.Address, 250m, aliceWallet.PublicKey, "ALICE_COIN", fee: 1m);
+    if (transferTx == null)
+    {
+        Console.WriteLine("Alice token transfer was rejected unexpectedly.");
+        return;
+    }
+
+    blockchain.AddTransactionToMempool(transferTx);
+    await MineAndBroadcastAsync(blockchain, p2pService, aliceWallet.Address);
+
+    Console.WriteLine("6) Final portfolios:");
+    PrintPortfolio("Alice", aliceWallet.Address, walletService);
+    PrintPortfolio("Bob", bobWallet.Address, walletService);
+}
+
+void PrintPortfolio(string owner, string address, WalletService walletService)
+{
+    var portfolio = walletService.GetPortfolio(address);
+    var parts = portfolio.OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+        .Select(kvp => $"{kvp.Key}={kvp.Value}");
+    Console.WriteLine($"{owner} ({address}): {string.Join(", ", parts)}");
+}
+
+async Task RunForkConsensusDemoAsync()
+{
+    Console.WriteLine("\n=== Extra: fork / consensus demo ===");
+
+    var nodeA = new BlockChainService("forkA", 6000, 5);
+    var nodeB = new BlockChainService("forkB", 6001, 5);
+    var nodeAService = new TransactionService(nodeA);
+    var nodeBService = new TransactionService(nodeB);
+
+    var aliceNodeA = new WalletService(nodeA.Chain).CreateWallet("Alice");
+    var bobNodeB = new WalletService(nodeB.Chain).CreateWallet("Bob");
+
+    await nodeA.MineBlockAsync(aliceNodeA.Address);
+    await nodeB.MineBlockAsync(bobNodeB.Address);
+    await nodeB.MineBlockAsync(bobNodeB.Address);
+
+    var issueA = nodeAService.CreateIssueTransaction(aliceNodeA, "MEME", 1000m, aliceNodeA.PublicKey);
+    var issueB = nodeBService.CreateIssueTransaction(bobNodeB, "MEME", 2000m, bobNodeB.PublicKey);
+
+    if (issueA != null)
+    {
+        nodeA.AddTransactionToMempool(issueA);
+        await nodeA.MineBlockAsync(aliceNodeA.Address);
+    }
+
+    if (issueB != null)
+    {
+        nodeB.AddTransactionToMempool(issueB);
+        await nodeB.MineBlockAsync(bobNodeB.Address);
+        await nodeB.MineBlockAsync(bobNodeB.Address);
+    }
+
+    Console.WriteLine($"Node A chain length before reorg: {nodeA.Chain.Count}");
+    Console.WriteLine($"Node B chain length before reorg: {nodeB.Chain.Count}");
+
+    var accepted = nodeA.ResolveConflicts(nodeB.Chain);
+    Console.WriteLine(accepted
+        ? "[Fork] The longer chain was accepted, so the conflicting MEME issuance on Node A was rolled back."
+        : "[Fork] Node A kept its chain.");
+    Console.WriteLine($"Node A chain length after reorg: {nodeA.Chain.Count}");
+}
+
+async Task RunMarketMenuAsync(BlockChainService blockchain, TransactionService txService, WalletService walletService, Dictionary<string, Wallet> walletRegistry)
+{
+    var market = new MarketService(blockchain, txService, walletService, addr => walletRegistry.Values.FirstOrDefault(w => w.Address == addr));
+
+    while (true)
+    {
+        Console.WriteLine("\n=== Market ===");
+        Console.WriteLine("1: Place Sell Order");
+        Console.WriteLine("2: Place Buy Order");
+        Console.WriteLine("3: Match Orders");
+        Console.WriteLine("4: View Order Book");
+        Console.WriteLine("0: Back");
+        var ch = Console.ReadLine();
+        if (ch == "0") break;
+
+        switch (ch)
+        {
+            case "1":
+                Console.Write("Owner (name): ");
+                var owner = Console.ReadLine() ?? "";
+                if (!walletRegistry.ContainsKey(owner)) { Console.WriteLine("Unknown owner"); break; }
+                Console.Write("Currency (ticker): ");
+                var cur = Console.ReadLine() ?? "";
+                Console.Write("Amount: ");
+                if (!decimal.TryParse(Console.ReadLine(), out decimal amt)) { Console.WriteLine("Bad amount"); break; }
+                Console.Write("Price per unit (in BASE): ");
+                if (!decimal.TryParse(Console.ReadLine(), out decimal ppu)) { Console.WriteLine("Bad price"); break; }
+                try
+                {
+                    var ord = market.PlaceSellOrder(owner, walletRegistry[owner].Address, cur, amt, ppu);
+                    Console.WriteLine($"Sell order placed: {ord.Id}");
+                }
+                catch (Exception ex) { Console.WriteLine($"Failed: {ex.Message}"); }
+                break;
+
+            case "2":
+                Console.Write("Owner (name): ");
+                owner = Console.ReadLine() ?? "";
+                if (!walletRegistry.ContainsKey(owner)) { Console.WriteLine("Unknown owner"); break; }
+                Console.Write("Currency (ticker): ");
+                cur = Console.ReadLine() ?? "";
+                Console.Write("Amount: ");
+                if (!decimal.TryParse(Console.ReadLine(), out amt)) { Console.WriteLine("Bad amount"); break; }
+                Console.Write("Price per unit (in BASE): ");
+                if (!decimal.TryParse(Console.ReadLine(), out ppu)) { Console.WriteLine("Bad price"); break; }
+                try
+                {
+                    var ord = market.PlaceBuyOrder(owner, walletRegistry[owner].Address, cur, amt, ppu);
+                    Console.WriteLine($"Buy order placed: {ord.Id}");
+                }
+                catch (Exception ex) { Console.WriteLine($"Failed: {ex.Message}"); }
+                break;
+
+            case "3":
+                var trades = market.MatchOrders();
+                Console.WriteLine($"Executed trades: {trades.Count}");
+                foreach (var t in trades)
+                    Console.WriteLine($"Trade: {t.buy.Id} <=> {t.sell.Id} amount={t.executedAmount}");
+                break;
+
+            case "4":
+                Console.WriteLine("Buy orders:");
+                foreach (var b in market.BuyOrders) Console.WriteLine($"{b.Id} {b.OwnerName} {b.Currency} {b.Amount}@{b.PricePerUnit}");
+                Console.WriteLine("Sell orders:");
+                foreach (var s in market.SellOrders) Console.WriteLine($"{s.Id} {s.OwnerName} {s.Currency} {s.Amount}@{s.PricePerUnit}");
+                break;
+        }
+    }
+}
 
 //void RunMerkleTreeDemo()
 //{

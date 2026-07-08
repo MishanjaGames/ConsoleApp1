@@ -4,10 +4,10 @@
     {
         public int Index { get; set; }
         public DateTime TimeStamp { get; set; }
-        public List<Transaction> Transactions { get; set; }
-        public string PreviousHash { get; set; }
+        public List<Transaction> Transactions { get; set; } = new List<Transaction>();
+        public string PreviousHash { get; set; } = string.Empty;
         public long Nonce { get; set; }
-        public string Hash { get; set; }
+        public string Hash { get; set; } = string.Empty;
         public double MiningDuration { get; set; }
         public int Difficulty { get; set; }
 

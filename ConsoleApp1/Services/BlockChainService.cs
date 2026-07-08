@@ -9,8 +9,7 @@ namespace BlockChain_01.Services
         private readonly TransactionService _transactionService;
         private readonly WalletService _walletService;
         private readonly FileStorageService _storageService;
-        private readonly TCPP2PService _p2pService;
-        public List<Block> Chain { get; set; }
+        public List<Block> Chain { get; set; } = new List<Block>();
         public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
         public int Difficulty { get; private set; }
         public int MaxBlockSizeBytes { get; } = 10240;
@@ -20,9 +19,8 @@ namespace BlockChain_01.Services
         private readonly double _targetBlockTime;
         private readonly int _adjustmentInterval = 2;
         private const double _miningDurationTolerance = 2.0;
-        private readonly decimal _miningReward = 50m;
-        private readonly decimal maxTransactionAmount = 2m;
-        private readonly int howingInterval = 5;
+        private readonly decimal _miningReward = 200m;
+        private readonly int howingInterval = 10;
         public BlockChainService(string uname, int p, double targetBlockTime = 5)
         {
             Chain = new List<Block>();
@@ -31,7 +29,7 @@ namespace BlockChain_01.Services
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
             _transactionService = new TransactionService(this);
-            _walletService = new WalletService(Chain);
+            _walletService = new WalletService(() => Chain);
             Difficulty = 1;
 
 
@@ -49,7 +47,8 @@ namespace BlockChain_01.Services
                     _storageService.fixBackup();
 
                     loadedChain = _storageService.useBackup();
-                    Chain = loadedChain;
+                    if (loadedChain != null)
+                        Chain = loadedChain;
                     if (!this.IsValid())
                     {
                         Chain = new List<Block>();
@@ -69,7 +68,7 @@ namespace BlockChain_01.Services
             _storageService.SaveBlockchain(Chain);
         }
 
-        public async Task<Block> MineBlockAsync(string miningAddress,
+        public async Task<Block?> MineBlockAsync(string miningAddress,
             CancellationToken cancellationToken = default)
         {
             //var (included, weight) = FitToByteLimit(transactions);
@@ -82,27 +81,52 @@ namespace BlockChain_01.Services
             var minerSubsidy = GetMinerReward();
             var totalreward = totalFees + minerSubsidy;
 
+            var invalidTransactions = new List<Transaction>();
             foreach (var transaction in PendingTransactions)
             {
-                if (!_transactionService.ValidateTransaction(transaction).IsValid)
+                var (isValid, error) = _transactionService.ValidateTransaction(transaction);
+                if (!isValid)
                 {
-                    throw new InvalidOperationException("Invalid Transaction");
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"[Mempool] Dropping invalid tx ({transaction.Id}) from {transaction.From} -> {transaction.To}: {error}");
+                    Console.ResetColor();
+                    invalidTransactions.Add(transaction);
+                    continue;
                 }
 
                 if (transaction.From != "COINBASE")
                 {
-                    if (!tempBalances.TryGetValue(transaction.From, out var bal))
+                    // Debit the transacted currency (issuance debits nothing besides the ICO tax below).
+                    if (transaction.Type != Models.TransactionType.IssueToken)
                     {
-                        bal = spentWallet.GetBalance(transaction.From);
+                        string amountKey = $"{transaction.From}|{transaction.Currency}";
+                        if (!tempBalances.TryGetValue(amountKey, out var bal))
+                            bal = spentWallet.GetBalance(transaction.From, transaction.Currency);
+
+                        if (bal < transaction.Amount)
+                        {
+                            throw new InvalidOperationException(
+                                $"Double spend detected: {transaction.From} has {bal} {transaction.Currency}, tried to spend {transaction.Amount}");
+                        }
+
+                        tempBalances[amountKey] = bal - transaction.Amount;
                     }
 
-                    if (bal < transaction.Amount)
+                    // Network fee / ICO tax is always debited in BASE.
+                    if (transaction.Fee != 0)
                     {
-                        throw new InvalidOperationException(
-                            $"Double spend detected: {transaction.From} has {bal}, tried to spend {transaction.Amount}");
-                    }
+                        string feeKey = $"{transaction.From}|BASE";
+                        if (!tempBalances.TryGetValue(feeKey, out var feeBal))
+                            feeBal = spentWallet.GetBalance(transaction.From, "BASE");
 
-                    tempBalances[transaction.From] = bal - transaction.Amount;
+                        if (feeBal < transaction.Fee)
+                        {
+                            throw new InvalidOperationException(
+                                $"Double spend detected: {transaction.From} has {feeBal} BASE, cannot cover fee {transaction.Fee}");
+                        }
+
+                        tempBalances[feeKey] = feeBal - transaction.Fee;
+                    }
                 }
             }
 
@@ -111,8 +135,18 @@ namespace BlockChain_01.Services
             decimal remainingSupply = MaxSupply - TotalMinted;
             decimal rewardAmount = remainingSupply >= minerSubsidy ? minerSubsidy : Math.Max(0, remainingSupply);
 
+            // Remove invalid transactions discovered during validation from the mempool and the candidate set
+            if (invalidTransactions.Count > 0)
+            {
+                foreach (var bad in invalidTransactions)
+                {
+                    PendingTransactions.Remove(bad);
+                }
+                sortedTransactions.RemoveAll(tx => invalidTransactions.Contains(tx));
+            }
+
             var includedTransactions = sortedTransactions.ToList();
-            Transaction rewardTx = null;
+            Transaction? rewardTx = null;
             if (rewardAmount > 0)
             {
                 rewardTx = new Transaction("COINBASE", miningAddress, totalreward, new byte[0]);
@@ -266,6 +300,40 @@ namespace BlockChain_01.Services
         public Block? FindBlockByHash(string targetHash)
             => Chain.FirstOrDefault(b => b.Hash == targetHash);
 
+        /// <summary>
+        /// True if a ticker is already taken — either confirmed in chain history or in-flight in the mempool.
+        /// "BASE" always counts as existing (it's the native coin).
+        /// </summary>
+        public bool CurrencyExists(string currency)
+        {
+            if (string.IsNullOrWhiteSpace(currency)) return false;
+            if (currency.Equals("BASE", StringComparison.OrdinalIgnoreCase)) return true;
+
+            foreach (var block in Chain)
+                foreach (var tx in block.Transactions)
+                    if (tx.Type == TransactionType.IssueToken && tx.Currency.Equals(currency, StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+            foreach (var tx in PendingTransactions)
+                if (tx.Type == TransactionType.IssueToken && tx.Currency.Equals(currency, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the tickers of every currency ever issued on this chain (excluding BASE).
+        /// </summary>
+        public List<string> GetIssuedCurrencies()
+        {
+            return Chain
+                .SelectMany(b => b.Transactions)
+                .Where(tx => tx.Type == TransactionType.IssueToken)
+                .Select(tx => tx.Currency)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         public bool ValidateEconomy()
         {
             var addresses = new HashSet<string>();
@@ -287,14 +355,34 @@ namespace BlockChain_01.Services
 
         public int MaxMempoolSize { get; } = 5;
 
-        public decimal GetPendingBalance(string address)
+        public decimal GetPendingBalance(string address, string currency = "BASE", decimal? requiredAmount = null)
         {
-            decimal balance = _walletService.GetBalance(address);
+            decimal balance = _walletService.GetBalance(address, currency);
             foreach (var tx in PendingTransactions)
             {
-                if (tx.From == address)
-                    balance -= (tx.Amount + tx.Fee);
+                if (tx.From != address) continue;
+
+                if (tx.Type == TransactionType.IssueToken)
+                {
+                    if (currency.Equals("BASE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // ICO only needs to reserve the BASE fee once; the token emission itself is credited to the issuer.
+                        balance -= tx.Fee;
+                    }
+                }
+                else
+                {
+                    if (tx.Currency.Equals(currency, StringComparison.OrdinalIgnoreCase))
+                        balance -= tx.Amount;
+
+                    if (currency.Equals("BASE", StringComparison.OrdinalIgnoreCase))
+                        balance -= tx.Fee;
+                }
             }
+
+            if (requiredAmount.HasValue)
+                balance -= requiredAmount.Value;
+
             return balance;
         }
 
@@ -306,9 +394,22 @@ namespace BlockChain_01.Services
 
             if (transaction.From != "COINBASE")
             {
-                var pendingBalance = GetPendingBalance(transaction.From);
-                if (pendingBalance < transaction.Amount + transaction.Fee)
-                    throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingBalance}, tried to spend {transaction.Amount + transaction.Fee}");
+                if (transaction.Type == TransactionType.IssueToken)
+                {
+                    var pendingBaseBalance = GetPendingBalance(transaction.From, "BASE", transaction.Fee);
+                    if (pendingBaseBalance < 0)
+                        throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingBaseBalance}, tried to spend {transaction.Fee}");
+                }
+                else
+                {
+                    var pendingTokenBalance = GetPendingBalance(transaction.From, transaction.Currency, transaction.Amount);
+                    if (pendingTokenBalance < 0)
+                        throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingTokenBalance}, tried to spend {transaction.Amount}");
+
+                    var pendingBaseBalance = GetPendingBalance(transaction.From, "BASE", transaction.Fee);
+                    if (pendingBaseBalance < 0)
+                        throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingBaseBalance}, tried to spend {transaction.Fee}");
+                }
 
                 var existing = PendingTransactions.FirstOrDefault(tx =>
                     tx.From == transaction.From &&

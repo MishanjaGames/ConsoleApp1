@@ -8,10 +8,10 @@ namespace BlockChain_01.Models
 {
     public class Wallet
     {
-        public string Name { get; set; }
-        public string Address { get; set; }
-        public byte[] PublicKey { get; set; }
-        private byte[] PrivateKey { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Address { get; set; } = string.Empty;
+        public byte[] PublicKey { get; set; } = new byte[0];
+        private byte[] PrivateKey { get; set; } = new byte[0];
 
         public Wallet () { }
 

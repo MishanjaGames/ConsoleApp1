@@ -14,7 +14,7 @@ namespace BlockChain_01.Models
     public class P2PMessage
     {
         public MessageType Type { get; set; }
-        public string Data { get; set; }
+        public string Data { get; set; } = string.Empty;
         public P2PMessage() { }
         public P2PMessage(MessageType type, string data)
         {

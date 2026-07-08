@@ -18,7 +18,7 @@ namespace BlockChain_01.Services
             CancellationToken cancellationToken = default)
         {
             string target = string.Empty;
-            int threadCount = Environment.ProcessorCount / 2;
+            int threadCount = (Environment.ProcessorCount / 4) * 3;
             if (!useDifficulty)
             {
                 target = VanityTarget;
