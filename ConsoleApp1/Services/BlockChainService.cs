@@ -26,7 +26,7 @@ namespace BlockChain_01.Services
         public BlockChainService(string uname, int p, double targetBlockTime = 5)
         {
             Chain = new List<Block>();
-            _storageService = new FileStorageService(uname,p);
+            _storageService = new FileStorageService(uname, p);
             _targetBlockTime = targetBlockTime;
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
@@ -42,9 +42,8 @@ namespace BlockChain_01.Services
 
                 if (!this.IsValid())
                 {
-                    // Part 3: corrupted file handling
                     Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("⚠️ КРИТИЧНА ПОМИЛКА: Файл блокчейну пошкоджено!");
+                    Console.WriteLine("⚠️ CRITICAL: File is corrupted!");
                     Console.ResetColor();
 
                     _storageService.fixBackup();
@@ -112,13 +111,11 @@ namespace BlockChain_01.Services
             decimal remainingSupply = MaxSupply - TotalMinted;
             decimal rewardAmount = remainingSupply >= minerSubsidy ? minerSubsidy : Math.Max(0, remainingSupply);
 
-            // Prepare included transactions for this block: sorted txs + coinbase reward (if any)
             var includedTransactions = sortedTransactions.ToList();
             Transaction rewardTx = null;
             if (rewardAmount > 0)
             {
                 rewardTx = new Transaction("COINBASE", miningAddress, totalreward, new byte[0]);
-                // coinbase transaction is included in the block but not added to the mempool
                 includedTransactions.Insert(0, rewardTx);
                 TotalMinted += rewardAmount;
             }
@@ -138,7 +135,6 @@ namespace BlockChain_01.Services
                 return null;
 
             Chain.Add(newBlock);
-            // Remove only transactions that were present in mempool (rewardTx was never added to mempool)
             PendingTransactions.RemoveAll(tx => sortedTransactions.Contains(tx));
             _storageService.SaveBlockchain(Chain);
             return newBlock;
@@ -236,14 +232,13 @@ namespace BlockChain_01.Services
                 double physicalDiff = (cur.TimeStamp - prev.TimeStamp).TotalSeconds;
                 if (cur.MiningDuration > physicalDiff + _miningDurationTolerance) return false;
 
-                // Part 2: verify signatures of all non-coinbase transactions
                 foreach (var tx in cur.Transactions)
                 {
                     if (tx.From == "COINBASE") continue;
                     if (!_walletService.VerifySignature(tx.SenderPublicKey, tx.GetDataToSign(), tx.Signature))
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[КРИТИЧНА ЗАГРОЗА]: Виявлено підроблену транзакцію в блоці {cur.Index}!");
+                        Console.WriteLine($"[CRITICAL]: Found corrupted transaction in {cur.Index}!");
                         Console.ResetColor();
                         return false;
                     }
@@ -311,12 +306,10 @@ namespace BlockChain_01.Services
 
             if (transaction.From != "COINBASE")
             {
-                // Part 3: use pending balance
                 var pendingBalance = GetPendingBalance(transaction.From);
                 if (pendingBalance < transaction.Amount + transaction.Fee)
                     throw new InvalidOperationException($"Insufficient funds (pending): {transaction.From} has {pendingBalance}, tried to spend {transaction.Amount + transaction.Fee}");
 
-                // Part 2: RBF check
                 var existing = PendingTransactions.FirstOrDefault(tx =>
                     tx.From == transaction.From &&
                     tx.To == transaction.To &&
@@ -398,8 +391,41 @@ namespace BlockChain_01.Services
                     return false;
                 }
 
+                int commonIndex = Math.Min(Chain.Count, externalChain.Count) - 1;
+                for (int i = Math.Min(Chain.Count, externalChain.Count) - 1; i >= 0; i--)
+                {
+                    if (Chain[i].Hash == externalChain[i].Hash) { commonIndex = i; break; }
+                }
+
+                var orphanedTransactions = new List<Transaction>();
+                for (int i = commonIndex + 1; i < Chain.Count; i++)
+                {
+                    orphanedTransactions.AddRange(Chain[i].Transactions.Where(tx => tx.From != "COINBASE"));
+                }
+
                 Chain = externalChain;
                 _storageService.SaveBlockchain(Chain);
+
+                var auditWallet = new WalletService(Chain);
+                var tempBalances = new Dictionary<string, decimal>();
+                foreach (var tx in orphanedTransactions)
+                {
+                    if (!tempBalances.TryGetValue(tx.From, out var bal))
+                        bal = auditWallet.GetBalance(tx.From);
+
+                    if (bal >= tx.Amount + tx.Fee)
+                    {
+                        tempBalances[tx.From] = bal - (tx.Amount + tx.Fee);
+                        PendingTransactions.Add(tx);
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[SECURITY] 🚨 Denied return of {tx.Id} into mempool (Doubled payment / Insufficient funds)!");
+                        Console.ResetColor();
+                    }
+                }
+
                 return true;
             }
             return false;
